@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PDF → Markdown 변환기</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ctext y='26' font-size='26'%3E%F0%9F%93%84%3C/text%3E%3C/svg%3E">
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+
+<header class="topbar">
+  <div class="brand">
+    <span class="logo">PDF<span class="arrow">→</span>MD</span>
+    <span class="tagline">원본 서식을 최대한 살려 마크다운으로</span>
+  </div>
+  <button id="themeToggle" class="ghost" type="button" title="테마 전환">◐</button>
+</header>
+
+<main class="layout">
+
+  <!-- 왼쪽: 입력 + 파일 목록 -->
+  <section class="pane pane-left">
+
+    <div id="drop" class="dropzone" tabindex="0" role="button"
+         aria-label="PDF 파일 선택 또는 끌어다 놓기">
+      <div class="drop-icon">⬇</div>
+      <p class="drop-title">PDF를 끌어다 놓거나 클릭해서 선택</p>
+      <p class="drop-sub">여러 개를 한 번에 고를 수 있습니다 · 폴더째 끌어와도 됩니다</p>
+      <input id="fileInput" type="file" accept="application/pdf,.pdf" multiple hidden>
+    </div>
+
+    <details class="options" id="optionsBox">
+      <summary>변환 옵션 <span class="hint">서식 보존 방식</span></summary>
+      <div class="opt-grid">
+        <label class="opt"><input type="checkbox" data-opt="detect_headings" checked><span>제목 자동 인식<em>글자 크기·굵기로 # 계층 부여</em></span></label>
+        <label class="opt"><input type="checkbox" data-opt="use_toc" checked><span>PDF 북마크 사용<em>목차가 있으면 제목 계층에 우선 적용</em></span></label>
+        <label class="opt"><input type="checkbox" data-opt="detect_lists" checked><span>목록 인식<em>글머리표·번호·들여쓰기 단계</em></span></label>
+        <label class="opt"><input type="checkbox" data-opt="inline_styles" checked><span>굵게/기울임/고정폭<em>**bold**, *italic*, `code`</em></span></label>
+        <label class="opt"><input type="checkbox" data-opt="links" checked><span>하이퍼링크 보존<em>[텍스트](주소)</em></span></label>
+        <label class="opt"><input type="checkbox" data-opt="columns" checked><span>다단 레이아웃 복원<em>2단 조판 읽기 순서 정렬</em></span></label>
+        <label class="opt"><input type="checkbox" data-opt="strip_header_footer" checked><span>머리말/꼬리말 제거<em>반복되는 제목줄·쪽번호</em></span></label>
+        <label class="opt"><input type="checkbox" data-opt="join_hyphens" checked><span>줄바꿈 하이픈 병합<em>conver-<br>sion → conversion</em></span></label>
+        <label class="opt"><input type="checkbox" data-opt="page_separator"><span>페이지 구분선<em>페이지마다 ---</em></span></label>
+        <label class="opt"><input type="checkbox" data-opt="page_comment"><span>페이지 주석<em>&lt;!-- page N --&gt;</em></span></label>
+        <label class="opt"><input type="checkbox" data-opt="front_matter"><span>YAML 머리말<em>제목·작성자·출처 메타</em></span></label>
+
+        <label class="opt select">표 처리
+          <select data-opt="tables">
+            <option value="markdown" selected>마크다운 표</option>
+            <option value="html">HTML 표 (셀 병합·줄바꿈에 유리)</option>
+            <option value="text">고정폭 블록</option>
+            <option value="skip">본문으로 흘리기</option>
+          </select>
+        </label>
+        <label class="opt select">이미지 처리
+          <select data-opt="images">
+            <option value="extract" selected>파일로 추출 (ZIP에 동봉)</option>
+            <option value="base64">base64로 .md에 삽입</option>
+            <option value="skip">제외</option>
+          </select>
+        </label>
+      </div>
+    </details>
+
+    <div class="actions">
+      <button id="convertBtn" class="primary" disabled>변환 시작</button>
+      <button id="zipBtn" class="secondary" disabled>전체 ZIP 내려받기</button>
+      <button id="clearBtn" class="ghost" disabled>목록 비우기</button>
+    </div>
+
+    <div id="summary" class="summary" hidden></div>
+    <ul id="fileList" class="filelist"></ul>
+  </section>
+
+  <!-- 오른쪽: 결과 미리보기 -->
+  <section class="pane pane-right">
+    <div class="preview-head">
+      <div class="tabs">
+        <button class="tab active" data-view="rendered">미리보기</button>
+        <button class="tab" data-view="source">마크다운 원문</button>
+      </div>
+      <div class="preview-tools">
+        <span id="previewName" class="pv-name">결과 없음</span>
+        <button id="copyBtn" class="ghost" disabled>복사</button>
+        <button id="dlBtn" class="ghost" disabled>.md</button>
+        <button id="dlZipBtn" class="ghost" disabled>.zip</button>
+      </div>
+    </div>
+    <div id="previewRendered" class="preview markdown-body">
+      <p class="empty">왼쪽에서 PDF를 선택하고 <b>변환 시작</b>을 누르면 결과가 여기에 표시됩니다.</p>
+    </div>
+    <pre id="previewSource" class="preview source" hidden></pre>
+  </section>
+
+</main>
+
+<script src="/static/markdown.js"></script>
+<script src="/static/app.js"></script>
+</body>
+</html>
