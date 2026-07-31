@@ -2,8 +2,7 @@
    외부 라이브러리 없이 동작하도록 필요한 문법만 다룬다:
    제목 / 문단 / 목록(중첩) / 표 / 코드블록 / 인용 / 수평선 / 이미지 / 링크 /
    굵게·기울임·인라인코드. 출력 HTML은 직접 조립하며 원문은 모두 이스케이프한다. */
-(function (global) {
-  'use strict';
+/* (ES 모듈) */
 
   function esc(s) {
     return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
@@ -261,5 +260,4 @@
     return out;
   }
 
-  global.miniMarkdown = { render: render, escapeHtml: esc };
-})(window);
+export { render as renderMarkdown, esc as escapeHtml };

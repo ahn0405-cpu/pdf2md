@@ -1,2 +1,0 @@
-flask>=3.0
-pymupdf>=1.24

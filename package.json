@@ -1,0 +1,14 @@
+{
+  "name": "pdf2md",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "PDF를 원본 서식 그대로 Markdown으로 바꾸는 브라우저 전용 도구",
+  "scripts": {
+    "build": "node build.mjs",
+    "test": "node test/run.mjs"
+  },
+  "dependencies": {
+    "mupdf": "^1.28.0"
+  }
+}
