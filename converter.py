@@ -644,6 +644,38 @@ def _in_running_zone(y0: float, y1: float, page_height: float) -> bool:
     return y1 <= page_height * 0.10 or y0 >= page_height * 0.90
 
 
+def _page_line_index(page: dict) -> list[tuple[tuple, str]]:
+    """페이지의 (줄 상자, 지문) 목록 — 반복 문구 판정에 쓴다."""
+    out: list[tuple[tuple, str]] = []
+    for block in page.get("blocks", []):
+        if block.get("type") != 0:
+            continue
+        for line in block.get("lines", []):
+            text = _norm_ws("".join(s.get("text", "") for s in line.get("spans", [])))
+            if text:
+                out.append((tuple(line.get("bbox", (0, 0, 0, 0))), _fingerprint(text)))
+    return out
+
+
+def _is_standalone_line(bbox: tuple, page_lines: list[tuple[tuple, str]],
+                        running: set[str]) -> bool:
+    """그 줄이 가로줄 하나를 혼자 쓰는지.
+
+    매 페이지 같은 자리에 반복되는 본문 말머리("Best for:" 처럼 뒤에 내용이 이어지는 말)는
+    지문만 보면 꼬리말과 구별되지 않는다. 같은 가로줄에 매번 달라지는 글이 함께 있으면
+    본문으로 보고 남긴다. 진짜 머리말/꼬리말은 그 줄을 혼자 차지한다.
+    """
+    y0, y1 = bbox[1], bbox[3]
+    height = max(y1 - y0, 1e-6)
+    for other_bbox, other_fp in page_lines:
+        if other_bbox == bbox:
+            continue
+        overlap = min(y1, other_bbox[3]) - max(y0, other_bbox[1])
+        if overlap > height * 0.5 and other_fp not in running:
+            return False
+    return True
+
+
 def _detect_running(pages: list[dict], page_count: int) -> set[str]:
     """여러 페이지에 반복 등장하는 머리말/꼬리말 지문을 찾는다."""
     if page_count < 3:
@@ -861,6 +893,7 @@ def _convert(pdf_bytes: bytes, filename: str,
         table_boxes = [e.bbox for e in table_elems]
 
         # --- 텍스트 / 이미지 ------------------------------------------------
+        page_lines = _page_line_index(pd) if (opt.strip_header_footer and running) else []
         elems: list[Element] = list(table_elems)
         for block in pd.get("blocks", []):
             bbox = tuple(block.get("bbox", (0, 0, 0, 0)))
@@ -886,12 +919,16 @@ def _convert(pdf_bytes: bytes, filename: str,
                     continue
                 text = _norm_ws("".join(s.text for s in spans))
                 if opt.strip_header_footer:
-                    line_bbox = raw_line.get("bbox", (0, 0, 0, 0))
+                    line_bbox = tuple(raw_line.get("bbox", (0, 0, 0, 0)))
                     y0, y1 = line_bbox[1], line_bbox[3]
                     page_h = pd.get("height", page_rect.height) or 1
-                    # 반복 문구 제거는 반드시 페이지 위/아래 가장자리로 한정한다.
-                    # (본문에 같은 문구가 나오면 함께 지워져 내용이 사라진다)
-                    if _in_running_zone(y0, y1, page_h) and _fingerprint(text) in running:
+                    # 반복 문구 제거는 페이지 위/아래 가장자리에서, 그 가로줄을 혼자
+                    # 쓰는 줄에만 적용한다. (본문에 같은 문구가 있으면 함께 지워진다)
+                    if (
+                        _in_running_zone(y0, y1, page_h)
+                        and _fingerprint(text) in running
+                        and _is_standalone_line(line_bbox, page_lines, running)
+                    ):
                         continue
                     edge = y1 < page_h * 0.08 or y0 > page_h * 0.92
                     if edge and re.fullmatch(r"[-–—\s]*\d{1,4}\s*(/\s*\d{1,4})?[-–—\s]*", text):

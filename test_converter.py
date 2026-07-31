@@ -198,6 +198,22 @@ class MarkdownEscapeTest(unittest.TestCase):
 
 
 class LayoutTest(unittest.TestCase):
+    def test_repeated_label_sharing_a_row_is_kept(self) -> None:
+        """매 페이지 반복되는 본문 말머리를 꼬리말로 오인해 지우면 안 된다."""
+        doc = pymupdf.open()
+        for i in range(4):
+            page = doc.new_page()
+            page.insert_text((55, 110), f"{i + 1}쪽 본문.", fontname=KO, fontsize=10.5)
+            # 페이지 하단이지만, 매번 달라지는 내용이 같은 가로줄에 이어진다
+            page.insert_text((55, 740), "추천 대상:", fontname=KO, fontsize=10)
+            page.insert_text((130, 740), f"{i + 1}번 분야", fontname=KO, fontsize=10)
+            # 진짜 꼬리말 — 그 줄을 혼자 쓴다
+            page.insert_text((280, 780), f"- {i + 1} -", fontname=EN, fontsize=9)
+
+        md = converter.convert(doc.tobytes(), "label.pdf").markdown
+        self.assertEqual(md.count("추천 대상:"), 4)
+        self.assertNotIn("- 1 -", md)
+
     def test_running_header_removed_only_at_page_edge(self) -> None:
         """머리말과 같은 문구가 본문에 있으면 본문 쪽은 남아야 한다."""
         doc = pymupdf.open()
