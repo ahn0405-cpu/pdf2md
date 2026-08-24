@@ -9,6 +9,7 @@ const $ = (id) => document.getElementById(id);
 
 const drop = $('drop'), fileInput = $('fileInput'), listEl = $('fileList');
 const convertBtn = $('convertBtn'), zipBtn = $('zipBtn'), clearBtn = $('clearBtn');
+const eachBtn = $('eachBtn');
 const summaryEl = $('summary');
 const renderedEl = $('previewRendered'), sourceEl = $('previewSource');
 const previewName = $('previewName');
@@ -148,6 +149,7 @@ function renderList() {
     li.className = 'item' + (item.uid === selectedUid ? ' selected' : '');
     li.onclick = (e) => {
       if (e.target.classList.contains('item-remove')) return;
+      if (e.target.classList.contains('item-dl')) return;
       if (item.result) select(item.uid);
     };
 
@@ -166,6 +168,19 @@ function renderList() {
     size.className = 'item-size';
     size.textContent = humanSize(item.file.size);
 
+    // 목록에서 바로 받는다. 미리보기로 옮겨 가서 고르지 않아도 되도록.
+    let dl = null;
+    if (item.status === 'done') {
+      dl = document.createElement('button');
+      dl.className = 'item-dl';
+      dl.type = 'button';
+      dl.textContent = '⬇';
+      dl.title = item.result.assets.length
+        ? `${item.result.mdName.replace(/\.md$/, '')}.zip 로 내려받기 (본문 + 이미지 ${item.result.assets.length}개)`
+        : `${item.result.mdName} 내려받기`;
+      dl.onclick = (e) => { e.stopPropagation(); downloadOne(item); };
+    }
+
     const rm = document.createElement('button');
     rm.className = 'item-remove';
     rm.type = 'button';
@@ -178,7 +193,7 @@ function renderList() {
       renderList();
     };
 
-    top.append(badge, name, size, rm);
+    top.append(badge, name, size, ...(dl ? [dl] : []), rm);
     li.appendChild(top);
 
     if (item.status === 'busy') {
@@ -230,6 +245,10 @@ function updateButtons() {
   const done = files.filter((f) => f.status === 'done');
   convertBtn.disabled = running || !files.some((f) => f.status !== 'done');
   zipBtn.disabled = running || !done.length;
+  eachBtn.disabled = running || !done.length;
+  eachBtn.title = done.length > 1
+    ? `${done.length}개를 각각 따로 저장합니다 (브라우저가 여러 파일 저장 허용을 한 번 물을 수 있습니다)`
+    : '완료된 파일을 저장합니다';
   clearBtn.disabled = running || !files.length;
   convertBtn.textContent = running ? '변환 중…' : '변환 시작';
 }
@@ -393,6 +412,39 @@ copyBtn.onclick = async () => {
   try { document.execCommand('copy'); toast('마크다운을 복사했습니다.'); }
   catch { toast('복사에 실패했습니다.'); }
   ta.remove();
+};
+
+/** 파일 하나를 내려받는다. 이미지가 있으면 .zip(본문+이미지), 없으면 .md 하나로. */
+async function downloadOne(item) {
+  const { result } = item;
+  if (!result) return;
+  if (!result.assets.length) {
+    saveBlob(new Blob([result.markdown], { type: 'text/markdown;charset=utf-8' }), result.mdName);
+    return;
+  }
+  const entries = [{ name: result.mdName, data: result.markdown },
+                   ...result.assets.map((a) => ({ name: a.name, data: a.data }))];
+  saveBlob(await makeZip(entries), result.mdName.replace(/\.md$/, '') + '.zip');
+}
+
+eachBtn.onclick = async () => {
+  const done = files.filter((f) => f.status === 'done');
+  if (!done.length) return;
+  eachBtn.disabled = true;
+  eachBtn.textContent = '저장 중…';
+  try {
+    for (const item of done) {
+      await downloadOne(item);
+      // 연달아 저장하면 브라우저가 뒤쪽 몇 개를 흘린다
+      await new Promise((r) => setTimeout(r, 150));
+    }
+    toast(`${done.length}개를 각각 저장했습니다.`);
+  } catch (err) {
+    toast(`저장에 실패했습니다: ${err.message || err}`);
+  } finally {
+    eachBtn.textContent = '각각 저장';
+    updateButtons();
+  }
 };
 
 dlBtn.onclick = () => {
