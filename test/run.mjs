@@ -184,3 +184,21 @@ test('같은 입력은 항상 같은 결과를 낸다', () => {
   const b = run('basic').markdown;
   assert.equal(a, b);
 });
+
+/* ---------------- 메모리 ---------------- */
+
+test('파일을 반복 변환해도 WASM 메모리가 늘지 않는다', () => {
+  // mupdf 는 글자마다 Font 를, 그려진 경로마다 Path/ColorSpace 를 새로 만들어 넘긴다.
+  // 소유권이 있는 참조라 받은 쪽이 해제해야 하고, 빠뜨리면 파일을 여러 개 변환할수록
+  // WASM 힙이 끝없이 는다(브라우저 탭이 죽는다). 여기서 새는지 확인한다.
+  const bytes = load('stress');
+  const heap = () => process.memoryUsage().external / 1048576;
+
+  for (let i = 0; i < 3; i++) convert(mupdf, bytes, 'stress.pdf');   // 힙을 미리 키운다
+  const before = heap();
+  for (let i = 0; i < 30; i++) convert(mupdf, bytes, 'stress.pdf');
+  const grown = heap() - before;
+
+  // 해제를 빠뜨리면 30회에 12MB 안팎 늘고, 제대로 돌려주면 0에 가깝다
+  assert.ok(grown < 4, `WASM 힙이 30회 변환에 ${grown.toFixed(1)}MB 늘었다 (누수 의심)`);
+});

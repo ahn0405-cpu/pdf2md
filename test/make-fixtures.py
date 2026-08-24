@@ -143,13 +143,32 @@ def scanned() -> pymupdf.Document:
     return doc
 
 
+def stress() -> pymupdf.Document:
+    """누수 감지용 — 글자와 벡터 경로를 많이 넣는다.
+
+    mupdf 는 글자마다 Font 래퍼를, 경로마다 Path/ColorSpace 래퍼를 만들어 넘기고
+    그 참조는 받은 쪽이 해제해야 한다. 해제를 빠뜨리면 이 문서에서 티가 난다."""
+    doc = pymupdf.open()
+    for i in range(8):
+        page = doc.new_page()
+        y = 50
+        for j in range(42):
+            page.insert_text((45, y), f"{i}-{j} 본문을 채우는 문장이며 한글과 English가 "
+                                      "섞여 있다. 글자 수를 늘린다.",
+                             fontname=KO, fontsize=8.5)
+            y += 13
+        for k in range(60):
+            page.draw_line((45, 620 + k * 2), (540, 620 + k * 2), width=0.4)
+    return doc
+
+
 def main() -> None:
     os.makedirs(OUT, exist_ok=True)
     for name, builder in [
         ("basic", basic), ("header-in-body", header_in_body),
         ("repeated-label", repeated_label), ("indented-code", indented_code),
         ("repeated-image", repeated_image), ("two-columns", two_columns),
-        ("scanned", scanned),
+        ("scanned", scanned), ("stress", stress),
     ]:
         doc = builder()
         doc.save(os.path.join(OUT, f"{name}.pdf"))

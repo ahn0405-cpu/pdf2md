@@ -28,6 +28,8 @@ export const DEFAULT_OPTIONS = {
 };
 
 const STEXT_FLAGS = 'preserve-whitespace,preserve-spans,preserve-images';
+// 이미지를 쓰지 않을 때는 아예 만들지 않는다 — 만들어 두면 해제 비용만 든다
+const STEXT_FLAGS_NO_IMAGES = 'preserve-whitespace,preserve-spans';
 
 /* ------------------------------------------------------------------ */
 /* 문자열 유틸                                                          */
@@ -144,24 +146,26 @@ function collectRules(mupdf, page) {
     };
   };
 
-  const drain = (path, ctm) => {
-    const w = walker(ctm || [1, 0, 0, 1, 0, 0]);
-    path.walk(w);
-    w.closePath();
+  // 콜백이 받는 path/stroke/colorspace 는 소유권이 있는 참조라 받은 쪽이 해제해야 한다.
+  const drain = (path, ctm, ...owned) => {
+    try {
+      const w = walker(ctm || [1, 0, 0, 1, 0, 0]);
+      path.walk(w);
+      w.closePath();
+    } finally {
+      for (const obj of [path, ...owned]) {
+        try { obj?.destroy?.(); } catch { /* 무시 */ }
+      }
+    }
   };
 
   let device;
   try {
+    // 괘선을 찾는 데 필요한 두 콜백만 선언한다. mupdf 는 선언해 둔 콜백에 대해서만
+    // 래퍼 객체를 만들어 넘기므로, 쓰지도 않을 no-op 을 늘어놓으면 그만큼 그냥 샌다.
     device = new mupdf.Device({
-      fillPath(path, evenOdd, ctm) { drain(path, ctm); },
-      strokePath(path, stroke, ctm) { drain(path, ctm); },
-      clipPath() {}, clipStrokePath() {},
-      fillText() {}, strokeText() {}, clipText() {}, clipStrokeText() {}, ignoreText() {},
-      fillShade() {}, fillImage() {}, fillImageMask() {}, clipImageMask() {},
-      popClip() {}, beginMask() {}, endMask() {}, beginGroup() {}, endGroup() {},
-      beginTile() { return 0; }, endTile() {}, beginLayer() {}, endLayer() {},
-      beginStructure() {}, endStructure() {}, beginMetatext() {}, endMetatext() {},
-      renderFlags() {}, setDefaultColorSpaces() {}, close() {},
+      fillPath(path, evenOdd, ctm, colorspace) { drain(path, ctm, colorspace); },
+      strokePath(path, stroke, ctm, colorspace) { drain(path, ctm, stroke, colorspace); },
     });
     page.run(device, mupdf.Matrix.identity);
   } catch {
@@ -417,7 +421,9 @@ function parsePage(st, linkRects, wantImages) {
       cur = null;
     },
     onChar(c, origin, font, size, quad) {
-      if (!line) return;
+      // walk 는 글자마다 Font 래퍼를 새로 만들어 넘긴다. 이 참조는 GC 가 돌 때까지
+      // WASM 힙에 남으므로, 필요한 값만 읽고 그 자리에서 돌려준다.
+      // (긴 문서를 여러 개 변환할 때 메모리가 계속 느는 가장 큰 원인이었다)
       const name = font.getName?.() || '';
       const style = {
         size: Math.round(size * 100) / 100,
@@ -425,6 +431,9 @@ function parsePage(st, linkRects, wantImages) {
         italic: !!font.isItalic?.(),
         mono: !!font.isMono?.() || MONO_NAME_RE.test(name),
       };
+      try { font.destroy?.(); } catch { /* 무시 */ }
+
+      if (!line) return;
       const box = quadToBox(quad);
       const key = `${name}|${style.size}|${style.bold}|${style.italic}|${style.mono}`;
       // 같은 글꼴이어도 가로로 크게 벌어지면 다른 조각으로 본다(표 셀 구분)
@@ -438,13 +447,20 @@ function parsePage(st, linkRects, wantImages) {
       }
     },
     onImageBlock(bbox, ctm, image) {
-      if (!wantImages) return;
-      const b = rectToBox(bbox);
-      if (b[2] - b[0] < 12 || b[3] - b[1] < 12) return;   // 구분선·아이콘 수준은 건너뜀
+      // walk 가 넘겨주는 이미지와 거기서 뜬 Pixmap 은 받은 쪽이 해제해야 한다.
+      // 놓치면 WASM 힙에 그대로 쌓여 파일을 여러 개 변환할수록 메모리가 계속 는다.
+      let pix = null;
       try {
-        const png = image.toPixmap().asPNG();
-        images.push({ bbox: b, data: new Uint8Array(png), ext: 'png' });
-      } catch { /* 디코딩 실패는 건너뜀 */ }
+        if (!wantImages) return;
+        const b = rectToBox(bbox);
+        if (b[2] - b[0] < 12 || b[3] - b[1] < 12) return;   // 구분선·아이콘 수준은 건너뜀
+        pix = image.toPixmap();
+        images.push({ bbox: b, data: new Uint8Array(pix.asPNG()), ext: 'png' });
+      } catch { /* 디코딩 실패는 건너뜀 */
+      } finally {
+        try { pix?.destroy?.(); } catch { /* 무시 */ }
+        try { image?.destroy?.(); } catch { /* 무시 */ }
+      }
     },
   });
 
@@ -997,44 +1013,50 @@ export function convert(mupdf, bytes, filename = 'document.pdf', options = {}) {
   const pages = [];
 
   try {
+    const wantImages = opt.images !== 'skip';
     for (let pno = 0; pno < pageCount; pno++) {
       const page = doc.loadPage(pno);
-      const box = page.getBounds();
-      const pageBox = Array.isArray(box) ? box : rectToBox(box);
+      // 페이지 도중에 예외가 나도 WASM 쪽 객체는 반드시 돌려준다
+      let st = null;
+      try {
+        const box = page.getBounds();
+        const pageBox = Array.isArray(box) ? box : rectToBox(box);
 
-      const linkRects = [];
-      if (opt.links) {
-        try {
-          for (const link of page.getLinks()) {
-            const uri = link.getURI?.();
-            if (uri) {
-              const b = link.getBounds();
-              linkRects.push({ rect: Array.isArray(b) ? b : rectToBox(b), uri });
+        const linkRects = [];
+        if (opt.links) {
+          try {
+            for (const link of page.getLinks()) {
+              const uri = link.getURI?.();
+              if (uri) {
+                const b = link.getBounds();
+                linkRects.push({ rect: Array.isArray(b) ? b : rectToBox(b), uri });
+              }
+              try { link.destroy?.(); } catch { /* 무시 */ }
             }
-          }
-        } catch { /* 링크 없음 */ }
+          } catch { /* 링크 없음 */ }
+        }
+
+        st = page.toStructuredText(wantImages ? STEXT_FLAGS : STEXT_FLAGS_NO_IMAGES);
+        const { blocks, images } = parsePage(st, linkRects, wantImages);
+
+        const grids = opt.tables !== 'skip' ? (() => {
+          const { hs, vs } = collectRules(mupdf, page);
+          return findTableGrids(hs, vs);
+        })() : [];
+
+        const allLines = blocks.flatMap(b => b.lines.map(l => {
+          const t = normWs(lineText(l));
+          return { bbox: l.bbox, text: t, fp: fingerprint(t) };
+        }));
+
+        pages.push({
+          pno, pageBox, blocks, images, grids, allLines,
+          height: pageBox[3] - pageBox[1] || 1,
+        });
+      } finally {
+        try { st?.destroy?.(); } catch { /* 무시 */ }
+        try { page.destroy?.(); } catch { /* 무시 */ }
       }
-
-      const st = page.toStructuredText(STEXT_FLAGS);
-      const { blocks, images } = parsePage(st, linkRects, opt.images !== 'skip');
-
-      const grids = opt.tables !== 'skip' ? (() => {
-        const { hs, vs } = collectRules(mupdf, page);
-        return findTableGrids(hs, vs);
-      })() : [];
-
-      const allLines = blocks.flatMap(b => b.lines.map(l => {
-        const t = normWs(lineText(l));
-        return { bbox: l.bbox, text: t, fp: fingerprint(t) };
-      }));
-
-      pages.push({
-        pno, pageBox, blocks, images, grids, allLines,
-        height: pageBox[3] - pageBox[1] || 1,
-      });
-
-      st.destroy?.();
-      page.destroy?.();
     }
 
     const { bodySize, headingMap } = collectSizeStats(pages);
