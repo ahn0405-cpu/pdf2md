@@ -143,6 +143,24 @@ def scanned() -> pymupdf.Document:
     return doc
 
 
+def tight_margin() -> pymupdf.Document:
+    """위쪽 여백이 좁아 본문이 머리말 구역까지 올라온 문서.
+
+    지문은 숫자를 자리표시자로 바꾸므로 "제1조(목적)"과 "제2조(목적)"이 같은 문구로
+    보인다. 여기서 본문을 지워 버리면 문서가 통째로 날아간다."""
+    doc = pymupdf.open()
+    for i in range(5):
+        page = doc.new_page()
+        page.insert_text((55, 58), f"제{i + 1}조(목적)", fontname=KO, fontsize=13)
+        page.insert_text((55, 82), f"{i + 1}. 이 조는 다음과 같은 내용을 규정한다.",
+                         fontname=KO, fontsize=10.5)
+        y = 120
+        for line in ["본문 내용이 여기서부터 이어진다.", "두 번째 줄이다."]:
+            page.insert_text((55, y), line, fontname=KO, fontsize=10.5)
+            y += 16
+    return doc
+
+
 def code_blocks() -> pymupdf.Document:
     """빈 줄이 든 코드, 목록처럼 보이는 코드 줄."""
     doc = pymupdf.open()
@@ -192,7 +210,8 @@ def main() -> None:
         ("basic", basic), ("header-in-body", header_in_body),
         ("repeated-label", repeated_label), ("indented-code", indented_code),
         ("repeated-image", repeated_image), ("two-columns", two_columns),
-        ("scanned", scanned), ("code-blocks", code_blocks), ("stress", stress),
+        ("scanned", scanned), ("code-blocks", code_blocks),
+        ("tight-margin", tight_margin), ("stress", stress),
     ]:
         doc = builder()
         doc.save(os.path.join(OUT, f"{name}.pdf"))

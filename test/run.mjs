@@ -219,6 +219,33 @@ test('본문 속 고정폭 구간의 연속 공백을 뭉개지 않는다', () =
   assert.match(codeBlocks.markdown, /`run {4}this {3}cmd`/);
 });
 
+/* ---------------- 머리말·꼬리말 ---------------- */
+
+test('여백이 좁아 본문이 가장자리까지 올라와도 지우지 않는다', () => {
+  // 지문은 숫자를 자리표시자로 바꿔 "제1조"와 "제2조"를 같게 본다. 그것만 믿고
+  // 지우면 본문이 통째로 사라진다 — 실제로 그랬다.
+  const md = run('tight-margin').markdown;
+  for (let n = 1; n <= 5; n++) {
+    assert.match(md, new RegExp(`^#+ 제${n}조\\(목적\\)$`, 'm'), `제${n}조 제목이 사라졌다`);
+    assert.match(md, new RegExp(`${n}\\\\?\\. 이 조는 다음과 같은 내용을 규정한다\\.`), `제${n}조 본문이 사라졌다`);
+  }
+});
+
+test('본문 첫 줄이 여러 개 올라와도 머리말로 오인하지 않는다', () => {
+  // 한 구역에서 세 줄 넘게 걸리면 머리말이 아니라 본문이다
+  const md = run('stress').markdown;
+  assert.match(md, /0-0 본문을 채우는 문장/);
+  assert.match(md, /0-1 본문을 채우는 문장/);
+  assert.match(md, /0-2 본문을 채우는 문장/);
+});
+
+test('진짜 반복 머리말·쪽번호는 그대로 지운다', () => {
+  const md = run('header-in-body').markdown;
+  // 머리말로 4번 나오고 본문에 1번 나온다 — 본문 것만 남아야 한다
+  assert.equal((md.match(/제3장 위험 관리/g) || []).length, 1);
+  assert.doesNotMatch(md, /^-? ?\d+ ?-?$/m);          // 쪽번호
+});
+
 /* ---------------- 링크 주소 · YAML ---------------- */
 
 test('공백이나 짝 안 맞는 괄호가 든 주소도 링크로 살린다', () => {

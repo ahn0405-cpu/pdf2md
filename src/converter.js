@@ -658,6 +658,36 @@ function isStandaloneLine(bbox, pageLines, running) {
   return true;
 }
 
+/** 이 페이지에서 머리말·꼬리말로 지울 줄을 고른다.
+ *
+ * 반복 지문만 믿으면 본문이 통째로 사라진다. 지문은 숫자를 자리표시자로 바꾸므로
+ * "제1조(목적)"과 "제2조(목적)"이 같은 문구로 보이고, 위쪽 여백이 좁아 본문 첫 줄이
+ * 가장자리 구역까지 올라온 문서에서는 그게 그대로 삭제로 이어진다. 두 가지를 더 본다.
+ *
+ * - 본문보다 큰 글자는 머리말이 아니다 (제목이 구역까지 올라온 경우)
+ * - 한 구역에서 세 줄 넘게 걸리면 머리말이 아니라 본문이다 (여백이 좁은 문서) */
+function pickRunningLines(page, running, bodySize) {
+  const top = [], bottom = [];
+  for (const line of page.blocks.flatMap(b => b.lines)) {
+    const [, y0, , y1] = line.bbox;
+    const atTop = y1 <= page.height * 0.10;
+    if (!atTop && y0 < page.height * 0.90) continue;
+    const text = normWs(lineText(line));
+    if (!running.has(fingerprint(text))) continue;
+    if (lineSize(line) > bodySize + 0.3) continue;
+    // 문장으로 끝나면 머리말이 아니라 본문이다. 쪽번호처럼 숫자·기호뿐인 줄은 예외.
+    if (/[.。]$/.test(text) && !/^[-–—\s\d./()]+$/.test(text)) continue;
+    if (!isStandaloneLine(line.bbox, page.allLines, running)) continue;
+    (atTop ? top : bottom).push(line.bbox);
+  }
+  const out = new Set();
+  for (const group of [top, bottom]) {
+    if (group.length > 2) continue;
+    for (const bbox of group) out.add(bbox);
+  }
+  return out;
+}
+
 function detectRunning(pages) {
   if (pages.length < 3) return new Set();
   const seen = new Map();
@@ -1189,6 +1219,7 @@ export function convert(mupdf, bytes, filename = 'document.pdf', options = {}) {
 
     for (const page of pages) {
       const elems = [];
+      const strip = opt.stripHeaderFooter ? pickRunningLines(page, running, bodySize) : null;
 
       // --- 표 ---
       const tableBoxes = [];
@@ -1208,13 +1239,11 @@ export function convert(mupdf, bytes, filename = 'document.pdf', options = {}) {
       for (const block of page.blocks) {
         if (tableBoxes.some(tb => overlapRatio(block.bbox, tb) > 0.55)) continue;
         const lines = block.lines.filter(line => {
-          if (!opt.stripHeaderFooter) return true;
+          if (!strip) return true;
+          if (strip.has(line.bbox)) return false;
           const [, y0, , y1] = line.bbox;
-          const text = normWs(lineText(line));
-          // 반복 문구 제거는 페이지 가장자리에서, 그 가로줄을 혼자 쓰는 줄에만 적용한다
-          if (inRunningZone(y0, y1, page.height) && running.has(fingerprint(text)) &&
-              isStandaloneLine(line.bbox, page.allLines, running)) return false;
           const edge = y1 < page.height * 0.08 || y0 > page.height * 0.92;
+          const text = normWs(lineText(line));
           if (edge && /^[-–—\s]*\d{1,4}\s*(\/\s*\d{1,4})?[-–—\s]*$/.test(text)) return false;
           return true;
         });
