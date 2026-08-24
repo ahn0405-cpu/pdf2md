@@ -14,6 +14,7 @@ import { fileURLToPath } from 'node:url';
 import * as mupdf from 'mupdf';
 import { convert, escapeLeading, stripOuterEmphasis, stripMarkerSpans,
          tableToMarkdown, tableToHtml, yamlString, mdUrl } from '../src/converter.js';
+import { renderMarkdown } from '../src/markdown.js';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const FIXTURES = path.join(HERE, 'fixtures');
@@ -262,6 +263,24 @@ test('YAML 머리말은 따옴표가 든 값에서도 깨지지 않는다', () =
   assert.equal(yamlString('2025 "Best" Report: a, b'), '"2025 \\"Best\\" Report: a, b"');
   assert.equal(yamlString('back\\slash'), '"back\\\\slash"');
   assert.equal(yamlString('여러\n줄\t탭'), '"여러 줄 탭"');
+});
+
+/* ---------------- 미리보기 ---------------- */
+
+test('미리보기가 추출한 이미지를 보여 준다', () => {
+  // 앱은 추출 이미지를 blob: 주소로 넘긴다. 검사기가 그걸 지우면 미리보기가
+  // 전부 깨진 이미지로 나온다 — 실제로 그랬다.
+  const resolve = (u) => (u === 'a.assets/x.png' ? 'blob:file:///abc-123' : u);
+  assert.match(renderMarkdown('![그림](a.assets/x.png)', resolve), /src="blob:file:\/\/\/abc-123"/);
+  assert.match(renderMarkdown('![i](data:image/png;base64,AAA)'), /src="data:image\/png;base64,AAA"/);
+});
+
+test('미리보기는 믿을 수 없는 주소를 그대로 두지 않는다', () => {
+  const resolve = (u) => u;                       // 앱이 만든 주소가 아니다
+  assert.match(renderMarkdown('![x](javascript:alert(1))', resolve), /src=""/);
+  assert.match(renderMarkdown('![x](blob:evil)'), /src=""/);
+  assert.match(renderMarkdown('[x](javascript:alert(1))'), /href="#"/);
+  assert.doesNotMatch(renderMarkdown('<img src=x onerror=alert(1)>'), /<img/);
 });
 
 /* ---------------- 메모리 ---------------- */

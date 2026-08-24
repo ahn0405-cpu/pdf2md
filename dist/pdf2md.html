@@ -3685,6 +3685,16 @@ const __ns_markdown = (() => {
     return u;
   }
 
+  // 부르는 쪽이 바꿔 준 주소는 그쪽이 직접 만든 것이라 그대로 쓴다.
+  // (추출한 이미지는 blob: 주소로 오는데, 검사기를 그냥 통과시키면 지워진다)
+  function imageUrl(url, resolve) {
+    if (resolve) {
+      var mapped = resolve(url);
+      if (mapped !== url) return mapped;
+    }
+    return safeImageUrl(url);
+  }
+
   // ---- 인라인 -------------------------------------------------------------
   function inline(src, resolve) {
     var out = '';
@@ -3713,7 +3723,7 @@ const __ns_markdown = (() => {
       if (ch === '!' && src[i + 1] === '[') {
         var img = matchLink(src, i + 1);
         if (img) {
-          out += '<img src="' + esc(safeImageUrl(resolve ? resolve(img.url) : img.url)) +
+          out += '<img src="' + esc(imageUrl(img.url, resolve)) +
                  '" alt="' + esc(img.text) + '">';
           i = img.end;
           continue;
