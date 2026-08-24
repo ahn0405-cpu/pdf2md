@@ -565,6 +565,16 @@ function orderElements(elems, pageBox, useColumns) {
 
 const elemAllMono = (el) => el.lines?.length > 0 && el.lines.every(allMono);
 
+/** 블록 안 줄 간격의 중앙값 — 사이에 빈 줄이 몇 개 들어갔는지 재는 자. */
+function linePitch(el) {
+  const lines = el.lines || [];
+  if (lines.length < 2) return 0;
+  const gaps = [];
+  for (let i = 1; i < lines.length; i++) gaps.push(lines[i].bbox[1] - lines[i - 1].bbox[1]);
+  gaps.sort((a, b) => a - b);
+  return gaps[Math.floor(gaps.length / 2)];
+}
+
 function elemSize(el) {
   const sizes = el.lines.map(lineSize).filter(Boolean).sort((a, b) => a - b);
   return sizes.length ? sizes[Math.floor(sizes.length / 2)] : 0;
@@ -585,8 +595,13 @@ function mergeTextElements(elems) {
     const bothMono = elemAllMono(prev) && elemAllMono(el);
     const aligned = bothMono || Math.abs(el.bbox[0] - prev.bbox[0]) <= Math.max(2, size * 1.6);
     const similar = Math.abs(size - prevSize) <= Math.max(0.4, prevSize * 0.12);
+    // 코드에는 빈 줄이 들어가는 게 정상이라, 고정폭끼리는 빈 줄 세 개까지 건너뛰어 잇는다.
+    // (끊어 버리면 코드 블록이 펜스 여러 개로 쪼개지고, 한 줄만 남은 조각은
+    //  코드로 인식조차 못 해 `- foo` 가 진짜 목록으로 바뀐다)
+    const pitch = linePitch(prev) || linePitch(el) || size * 1.35;
+    const maxGap = bothMono ? pitch * 3.5 : Math.max(size * 0.55, 2.5);
 
-    if (gap >= -1 && gap <= Math.max(size * 0.55, 2.5) && aligned && similar) {
+    if (gap >= -1 && gap <= maxGap && aligned && similar) {
       prev.lines.push(...el.lines);
       prev.bbox = unionBox([prev.bbox, el.bbox]);
     } else {
@@ -863,14 +878,36 @@ export function stripMarkerSpans(spans, marker) {
 function codeBlockBody(lines) {
   const baseX = Math.min(...lines.map(l => l.bbox[0]));
   const sizes = lines.map(lineSize).filter(Boolean);
-  const charW = Math.max(1, (sizes.length ? sizes.reduce((a, b) => a + b, 0) / sizes.length : 10) * 0.6);
-  return lines.map(line => {
+  const avgSize = sizes.length ? sizes.reduce((a, b) => a + b, 0) / sizes.length : 10;
+  const charW = Math.max(1, avgSize * 0.6);
+
+  // 빈 줄에는 글자가 없어 줄 자체가 없다. 가장 좁은 줄 간격을 한 줄 높이로 보고
+  // 그보다 벌어진 자리에 빈 줄을 되살린다. (중앙값을 쓰면 빈 줄이 많은 코드에서
+  // 기준 자체가 늘어나 정작 빈 줄을 못 찾는다)
+  const pitches = [];
+  for (let i = 1; i < lines.length; i++) {
+    const d = lines[i].bbox[1] - lines[i - 1].bbox[1];
+    if (d > 0) pitches.push(d);
+  }
+  // 간격이 하나뿐이면(줄이 둘) 그게 한 줄 높이인지 빈 줄이 낀 건지 알 수 없다 —
+  // 그때만 글자 크기로 어림잡는다.
+  const pitch = pitches.length >= 2
+    ? Math.max(Math.min(...pitches), avgSize)
+    : avgSize * 1.45;
+
+  const out = [];
+  lines.forEach((line, i) => {
+    if (i > 0 && pitch > 0) {
+      const blanks = Math.round((line.bbox[1] - lines[i - 1].bbox[1]) / pitch) - 1;
+      for (let k = 0; k < Math.min(blanks, 3); k++) out.push('');
+    }
     const raw = lineText(line).replace(/\s+$/, '');
-    if (!raw.trim()) return '';
-    if (/^\s/.test(raw)) return raw;
+    if (!raw.trim()) { out.push(''); return; }
+    if (/^\s/.test(raw)) { out.push(raw); return; }
     const pad = Math.max(0, Math.round((line.bbox[0] - baseX) / charW));
-    return ' '.repeat(pad) + raw;
-  }).join('\n');
+    out.push(' '.repeat(pad) + raw);
+  });
+  return out.join('\n');
 }
 
 function renderTextBlock(el, r, tocTitles) {
@@ -884,7 +921,11 @@ function renderTextBlock(el, r, tocTitles) {
 
   // 코드 블록: 블록 전체가 고정폭 글꼴
   if (el.lines.length > 1 && el.lines.every(allMono)) {
-    return ['```\n' + codeBlockBody(el.lines) + '\n```'];
+    const body = codeBlockBody(el.lines);
+    // 본문 안에 백틱 울타리가 들어 있으면 더 긴 울타리로 감싸야 안 깨진다
+    let fence = '```';
+    while (new RegExp(`^\\s*${fence}(?!\`)`, 'm').test(body)) fence += '`';
+    return [`${fence}\n${body}\n${fence}`];
   }
 
   let pending = [];
@@ -945,16 +986,30 @@ function renderTextBlock(el, r, tocTitles) {
   return chunks.filter(c => c.trim());
 }
 
-/** 연속된 목록 항목 사이의 빈 줄을 없애 촘촘한 목록으로 만든다. */
-function tightenLists(markdown) {
+/** 빈 줄을 정리한다 — 연속된 빈 줄은 하나로, 목록 항목 사이의 빈 줄은 없애
+ *  촘촘한 목록으로 만든다. 코드 울타리 안쪽은 원문 그대로 둔다(빈 줄도 코드의 일부다). */
+function normalizeBlankLines(markdown) {
   const item = /^\s*(?:[-*+]|\d{1,3}\.)\s+\S/;
   const lines = markdown.split('\n');
   const out = [];
-  lines.forEach((line, i) => {
-    if (!line.trim() && out.length && item.test(out[out.length - 1]) &&
-        i + 1 < lines.length && item.test(lines[i + 1])) return;
+  let fence = null;
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    const open = /^\s*(`{3,}|~{3,})/.exec(line);
+    if (fence === null && open) fence = open[1][0].repeat(open[1].length);
+    else if (fence !== null && open && open[1].startsWith(fence)) fence = null;
+
+    if (fence !== null || (open && fence === null)) { out.push(line); continue; }
+    if (!line.trim()) {
+      const prev = out[out.length - 1];
+      if (prev === undefined || !prev.trim()) continue;      // 연속된 빈 줄은 하나로
+      let j = i + 1;
+      while (j < lines.length && !lines[j].trim()) j++;
+      if (item.test(prev) && j < lines.length && item.test(lines[j])) continue;
+    }
     out.push(line);
-  });
+  }
   return out.join('\n');
 }
 
@@ -1163,8 +1218,7 @@ export function convert(mupdf, bytes, filename = 'document.pdf', options = {}) {
       if (opt.pageSeparator && page.pno < pageCount - 1) out.push('---');
     }
 
-    let markdown = out.filter(c => c.trim()).join('\n\n').replace(/\n{3,}/g, '\n\n');
-    markdown = tightenLists(markdown).trim() + '\n';
+    const markdown = normalizeBlankLines(out.filter(c => c.trim()).join('\n\n')).trim() + '\n';
 
     return {
       markdown,

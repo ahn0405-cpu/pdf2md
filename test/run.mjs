@@ -185,6 +185,35 @@ test('같은 입력은 항상 같은 결과를 낸다', () => {
   assert.equal(a, b);
 });
 
+/* ---------------- 코드 블록 ---------------- */
+
+const codeBlocks = run('code-blocks');
+
+test('코드 블록은 빈 줄에서 쪼개지지 않는다', () => {
+  // 빈 줄마다 새 펜스가 열리면 코드 한 덩어리가 여러 조각으로 흩어진다
+  const fences = codeBlocks.markdown.match(/^```/gm) || [];
+  assert.equal(fences.length, 4, '코드 블록 2개 = 펜스 4줄이어야 한다');
+  const block = /def alpha\(\):[\s\S]*?return 2/.exec(codeBlocks.markdown);
+  assert.ok(block, 'alpha·beta 코드를 찾지 못했다');
+  assert.doesNotMatch(block[0], /```/, '한 덩어리인 코드가 펜스 여러 개로 쪼개졌다');
+});
+
+test('코드 안의 빈 줄을 그대로 살린다', () => {
+  assert.match(codeBlocks.markdown, /    return 1\n\n\ndef beta/);   // 빈 줄 두 개
+  assert.match(codeBlocks.markdown, /- not a list\n\n- still code/);  // 빈 줄 한 개
+});
+
+test('목록처럼 보이는 코드 줄을 목록으로 바꾸지 않는다', () => {
+  // 코드 울타리 바깥만 남긴다 — 그 안에 코드 내용이 새어 나오면 안 된다
+  let inFence = false;
+  const outside = codeBlocks.markdown.split('\n').filter((line) => {
+    if (/^```/.test(line)) { inFence = !inFence; return false; }
+    return !inFence;
+  }).join('\n');
+  assert.doesNotMatch(outside, /not a list/);
+  assert.doesNotMatch(codeBlocks.markdown, /`not a list`/);   // 인라인 코드로도 아니다
+});
+
 /* ---------------- 메모리 ---------------- */
 
 test('파일을 반복 변환해도 WASM 메모리가 늘지 않는다', () => {

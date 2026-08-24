@@ -143,6 +143,27 @@ def scanned() -> pymupdf.Document:
     return doc
 
 
+def code_blocks() -> pymupdf.Document:
+    """빈 줄이 든 코드, 목록처럼 보이는 코드 줄."""
+    doc = pymupdf.open()
+    page = doc.new_page()
+    page.insert_text((55, 60), "설명 문단이 먼저 온다.", fontname=KO, fontsize=10.5)
+    y = 100
+    for line in ["def alpha():", "    return 1", "", "", "def beta():", "    return 2"]:
+        if line:
+            page.insert_text((55, y), line, fontname=MONO, fontsize=10)
+        y += 16
+    y += 24
+    page.insert_text((55, y), "다음은 목록처럼 보이지만 코드다.", fontname=KO, fontsize=10.5)
+    y += 30
+    for line in ["- not a list", "", "- still code"]:
+        if line:
+            page.insert_text((55, y), line, fontname=MONO, fontsize=10)
+        y += 16
+    page.insert_text((55, y + 24), "마무리 문단.", fontname=KO, fontsize=10.5)
+    return doc
+
+
 def stress() -> pymupdf.Document:
     """누수 감지용 — 글자와 벡터 경로를 많이 넣는다.
 
@@ -168,7 +189,7 @@ def main() -> None:
         ("basic", basic), ("header-in-body", header_in_body),
         ("repeated-label", repeated_label), ("indented-code", indented_code),
         ("repeated-image", repeated_image), ("two-columns", two_columns),
-        ("scanned", scanned), ("stress", stress),
+        ("scanned", scanned), ("code-blocks", code_blocks), ("stress", stress),
     ]:
         doc = builder()
         doc.save(os.path.join(OUT, f"{name}.pdf"))
