@@ -25,6 +25,7 @@ export const DEFAULT_OPTIONS = {
   pageComment: false,       // 페이지마다 <!-- page N --> 주석
   frontMatter: false,       // YAML front matter
   columns: true,            // 다단 레이아웃 읽기 순서 복원
+  trimNotice: false,        // 끝에 붙는 << 안내 >> 이하를 잘라낸다
 };
 
 const STEXT_FLAGS = 'preserve-whitespace,preserve-spans,preserve-images';
@@ -49,6 +50,10 @@ const ORDERED_RE = new RegExp(
   ')\\s+(?=\\S)'
 );
 const CIRCLED_RE = /^\s*([①-⑳㉑-㉟㊱-㊿])\s*(?=\S)/;
+// 관공서·특허 서식 끝에 붙는 안내문. 「<< 안내 >>」 처럼 괄호로 감싼 한 줄이다.
+// 본문이 아니라 서식 안내라서, 켜면 그 줄부터 문서 끝까지 버린다.
+const NOTICE_RE = /^\s*[※*]?\s*[<〈《【[(]{1,2}\s*안\s*내\s*[>〉》】\])]{1,2}\s*$/;
+
 const NUMBERED_HEADING_RE = /^\s*(?:\d+(?:\.\d+){0,4}[.)]?\s+\S|제\s*\d+\s*[장절편관조항]\s*)/;
 
 // 한자·가나는 아무 곳에서나 줄이 바뀌므로 이어 붙일 때 공백을 넣지 않는다.
@@ -123,14 +128,16 @@ function htmlEscape(text) {
              .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 }
 
-/** 이미지 중복 판정용 해시 (FNV-1a + 길이). */
+/** 이미지 중복 판정용 해시 (FNV-1a 두 갈래 + 길이).
+ *  같은 이미지를 한 파일로 합치고, 머리말·꼬리말 로고인지 가리는 데 쓴다.
+ *  서로 다른 이미지가 같은 값을 내면 엉뚱한 그림이 합쳐지거나 지워지므로 32비트로는 좁다. */
 function contentHash(bytes) {
-  let h = 0x811c9dc5;
+  let a = 0x811c9dc5, b = 0x01000193;
   for (let i = 0; i < bytes.length; i++) {
-    h ^= bytes[i];
-    h = Math.imul(h, 0x01000193) >>> 0;
+    a = Math.imul(a ^ bytes[i], 0x01000193) >>> 0;
+    b = Math.imul(b ^ bytes[i], 0x85ebca6b) >>> 0;
   }
-  return `${bytes.length}-${h.toString(16)}`;
+  return `${bytes.length}-${a.toString(16)}-${b.toString(16)}`;
 }
 
 /* ------------------------------------------------------------------ */
@@ -688,6 +695,55 @@ function pickRunningLines(page, running, bodySize) {
   return out;
 }
 
+/** 페이지 가장자리에서 되풀이되는 이미지 — 로고·직인·바코드 따위다.
+ *
+ * 관공서·특허 서식(의견서·보정서 등)은 쪽마다 같은 로고를 머리말·꼬리말에 찍는다.
+ * 본문이 아니므로 빼야 한다. 글로 된 머리말과 같은 잣대로, 같은 구역에서 절반
+ * 이상의 쪽에 되풀이되는 것만 고른다. */
+/** 끝에 붙는 안내문을 잘라낸다 — 그 줄이 있는 자리부터 문서 끝까지.
+ *
+ * 블록 순서가 아니라 y 좌표로 자른다. 구조화 텍스트의 블록 차례가 눈에 보이는
+ * 차례와 늘 같지는 않기 때문이다. 잘랐으면 true. */
+function trimNoticeSection(pages) {
+  for (let i = 0; i < pages.length; i++) {
+    const page = pages[i];
+    let cutY = Infinity;
+    for (const block of page.blocks) {
+      for (const line of block.lines) {
+        if (NOTICE_RE.test(normWs(lineText(line)))) cutY = Math.min(cutY, line.bbox[1]);
+      }
+    }
+    if (cutY === Infinity) continue;
+
+    const above = (box) => box[1] < cutY - 0.5;
+    for (const block of page.blocks) block.lines = block.lines.filter((l) => above(l.bbox));
+    page.blocks = page.blocks.filter((b) => b.lines.length);
+    page.images = page.images.filter((im) => above(im.bbox));
+    page.grids = page.grids.filter((g) => above(g.bbox));
+    page.allLines = page.allLines.filter((l) => above(l.bbox));
+    pages.length = i + 1;
+    return true;
+  }
+  return false;
+}
+
+function detectRunningImages(pages) {
+  if (pages.length < 2) return new Set();
+  const seen = new Map();
+  for (const page of pages) {
+    for (const img of page.images) {
+      if (!inRunningZone(img.bbox[1], img.bbox[3], page.height)) continue;
+      img.hash ??= contentHash(img.data);
+      if (!seen.has(img.hash)) seen.set(img.hash, new Set());
+      seen.get(img.hash).add(page.pno);
+    }
+  }
+  const threshold = Math.max(2, Math.ceil(pages.length * 0.5));
+  const out = new Set();
+  for (const [hash, pnos] of seen) if (pnos.size >= threshold) out.add(hash);
+  return out;
+}
+
 function detectRunning(pages) {
   if (pages.length < 3) return new Set();
   const seen = new Map();
@@ -1189,8 +1245,13 @@ export function convert(mupdf, bytes, filename = 'document.pdf', options = {}) {
       }
     }
 
+    if (opt.trimNotice && trimNoticeSection(pages)) {
+      warnings.push('「안내」 이후를 잘라냈습니다. 원문 전체가 필요하면 옵션을 끄세요.');
+    }
+
     const { bodySize, headingMap } = collectSizeStats(pages);
     const running = opt.stripHeaderFooter ? detectRunning(pages) : new Set();
+    const runningImages = opt.stripHeaderFooter ? detectRunningImages(pages) : new Set();
     const tocPages = (opt.useToc && opt.detectHeadings) ? tocByPage(doc, pageCount) : new Map();
     const listStops = opt.detectLists ? listIndentStops(pages, bodySize) : [];
     const renderer = new Renderer(opt, bodySize, headingMap, listStops);
@@ -1233,7 +1294,14 @@ export function convert(mupdf, bytes, filename = 'document.pdf', options = {}) {
       }
 
       // --- 이미지 ---
-      for (const img of page.images) elems.push({ kind: 'image', bbox: img.bbox, payload: img });
+      for (const img of page.images) {
+        // 쪽마다 되풀이되는 가장자리 로고·직인은 본문이 아니다
+        if (runningImages.size) {
+          img.hash ??= contentHash(img.data);
+          if (runningImages.has(img.hash)) continue;
+        }
+        elems.push({ kind: 'image', bbox: img.bbox, payload: img });
+      }
 
       // --- 텍스트 ---
       for (const block of page.blocks) {

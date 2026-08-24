@@ -33,20 +33,21 @@
     <details class="options" id="optionsBox">
       <summary>변환 옵션 <span class="hint">서식 보존 방식</span></summary>
       <div class="opt-grid">
-        <label class="opt"><input type="checkbox" data-opt="detect_headings" checked><span>제목 자동 인식<em>글자 크기·굵기로 # 계층 부여</em></span></label>
-        <label class="opt"><input type="checkbox" data-opt="use_toc" checked><span>PDF 북마크 사용<em>목차가 있으면 제목 계층에 우선 적용</em></span></label>
-        <label class="opt"><input type="checkbox" data-opt="detect_lists" checked><span>목록 인식<em>글머리표·번호·들여쓰기 단계</em></span></label>
-        <label class="opt"><input type="checkbox" data-opt="inline_styles" checked><span>굵게/기울임/고정폭<em>**bold**, *italic*, `code`</em></span></label>
-        <label class="opt"><input type="checkbox" data-opt="links" checked><span>하이퍼링크 보존<em>[텍스트](주소)</em></span></label>
-        <label class="opt"><input type="checkbox" data-opt="columns" checked><span>다단 레이아웃 복원<em>2단 조판 읽기 순서 정렬</em></span></label>
-        <label class="opt"><input type="checkbox" data-opt="strip_header_footer" checked><span>머리말/꼬리말 제거<em>반복되는 제목줄·쪽번호</em></span></label>
-        <label class="opt"><input type="checkbox" data-opt="join_hyphens" checked><span>줄바꿈 하이픈 병합<em>conver-<br>sion → conversion</em></span></label>
-        <label class="opt"><input type="checkbox" data-opt="page_separator"><span>페이지 구분선<em>페이지마다 ---</em></span></label>
-        <label class="opt"><input type="checkbox" data-opt="page_comment"><span>페이지 주석<em>&lt;!-- page N --&gt;</em></span></label>
-        <label class="opt"><input type="checkbox" data-opt="front_matter"><span>YAML 머리말<em>제목·작성자·출처 메타</em></span></label>
+        <label class="opt"><input type="checkbox" autocomplete="off" data-opt="detect_headings" checked><span>제목 자동 인식<em>글자 크기·굵기로 # 계층 부여</em></span></label>
+        <label class="opt"><input type="checkbox" autocomplete="off" data-opt="use_toc" checked><span>PDF 북마크 사용<em>목차가 있으면 제목 계층에 우선 적용</em></span></label>
+        <label class="opt"><input type="checkbox" autocomplete="off" data-opt="detect_lists" checked><span>목록 인식<em>글머리표·번호·들여쓰기 단계</em></span></label>
+        <label class="opt"><input type="checkbox" autocomplete="off" data-opt="inline_styles" checked><span>굵게/기울임/고정폭<em>**bold**, *italic*, `code`</em></span></label>
+        <label class="opt"><input type="checkbox" autocomplete="off" data-opt="links" checked><span>하이퍼링크 보존<em>[텍스트](주소)</em></span></label>
+        <label class="opt"><input type="checkbox" autocomplete="off" data-opt="columns" checked><span>다단 레이아웃 복원<em>2단 조판 읽기 순서 정렬</em></span></label>
+        <label class="opt"><input type="checkbox" autocomplete="off" data-opt="strip_header_footer" checked><span>머리말/꼬리말 제거<em>반복되는 제목줄·쪽번호</em></span></label>
+        <label class="opt"><input type="checkbox" autocomplete="off" data-opt="trim_notice"><span>끝의 안내문 제거<em>「&lt;&lt; 안내 &gt;&gt;」 이하를 버린다</em></span></label>
+        <label class="opt"><input type="checkbox" autocomplete="off" data-opt="join_hyphens" checked><span>줄바꿈 하이픈 병합<em>conver-<br>sion → conversion</em></span></label>
+        <label class="opt"><input type="checkbox" autocomplete="off" data-opt="page_separator"><span>페이지 구분선<em>페이지마다 ---</em></span></label>
+        <label class="opt"><input type="checkbox" autocomplete="off" data-opt="page_comment"><span>페이지 주석<em>&lt;!-- page N --&gt;</em></span></label>
+        <label class="opt"><input type="checkbox" autocomplete="off" data-opt="front_matter"><span>YAML 머리말<em>제목·작성자·출처 메타</em></span></label>
 
         <label class="opt select">표 처리
-          <select data-opt="tables">
+          <select autocomplete="off" data-opt="tables">
             <option value="markdown" selected>마크다운 표</option>
             <option value="html">HTML 표 (셀 병합·줄바꿈에 유리)</option>
             <option value="text">고정폭 블록</option>
@@ -54,7 +55,7 @@
           </select>
         </label>
         <label class="opt select">이미지 처리
-          <select data-opt="images">
+          <select autocomplete="off" data-opt="images">
             <option value="extract" selected>파일로 추출 (ZIP에 동봉)</option>
             <option value="base64">base64로 .md에 삽입</option>
             <option value="skip">제외</option>

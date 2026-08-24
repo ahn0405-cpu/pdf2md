@@ -44,7 +44,7 @@ function readOptions() {
   return opts;
 }
 
-(function restoreOptions() {
+function restoreOptions() {
   let saved = {};
   try { saved = JSON.parse(localStorage.getItem(OPT_KEY) || '{}'); } catch { saved = {}; }
   document.querySelectorAll('[data-opt]').forEach((el) => {
@@ -52,7 +52,11 @@ function readOptions() {
     if (v === undefined) return;
     if (el.type === 'checkbox') el.checked = !!v; else el.value = v;
   });
-})();
+}
+restoreOptions();
+// 새로고침하면 브라우저가 이전 세션의 폼 상태를 스크립트보다 늦게 되돌려 놓는다.
+// autocomplete="off" 로 막아 두었지만, 되돌아오는 경우를 대비해 한 번 더 맞춘다.
+window.addEventListener('pageshow', restoreOptions);
 
 document.querySelectorAll('[data-opt]').forEach((el) => {
   el.addEventListener('change', () => {

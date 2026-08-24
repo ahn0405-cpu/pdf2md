@@ -143,6 +143,35 @@ def scanned() -> pymupdf.Document:
     return doc
 
 
+def kipo_notice() -> pymupdf.Document:
+    """관공서·특허 서식 — 쪽마다 반복되는 로고/바코드와 끝의 안내문.
+
+    머리말 로고와 꼬리말 바코드는 본문이 아니라 서식이고, 「<< 안내 >>」 이하도
+    문서 내용이 아니라 제출 절차 안내다. 본문 도면 하나는 남아야 한다."""
+    doc = pymupdf.open()
+    logo, barcode, figure = png(60, 30, 120), png(120, 20, 60), png(200, 140, 200)
+    for i in range(3):
+        page = doc.new_page()
+        page.insert_image(pymupdf.Rect(50, 25, 110, 55), stream=logo)
+        page.insert_image(pymupdf.Rect(430, 790, 550, 810), stream=barcode)
+        y = 110
+        if i == 0:
+            page.insert_text((55, y), "의견제출통지서", fontname=KO, fontsize=16)
+            y += 40
+        page.insert_text((55, y), f"{i + 1}. 이 출원은 다음의 이유로 거절되어야 합니다.",
+                         fontname=KO, fontsize=10.5)
+        if i == 1:
+            page.insert_image(pymupdf.Rect(55, 300, 255, 440), stream=figure)
+            page.insert_text((55, 460), "[도면 1] 인용발명의 구성", fontname=KO, fontsize=10)
+        if i == 2:
+            page.insert_text((55, y + 70), "전기심사과 심사관 홍길동", fontname=KO, fontsize=11)
+            page.insert_text((55, y + 130), "<< 안내 >>", fontname=KO, fontsize=11)
+            for j, line in enumerate(["1. 의견서 제출기간은 2개월입니다.",
+                                      "2. 기간연장은 특허로에서 신청합니다."]):
+                page.insert_text((55, y + 155 + j * 18), line, fontname=KO, fontsize=10)
+    return doc
+
+
 def tight_margin() -> pymupdf.Document:
     """위쪽 여백이 좁아 본문이 머리말 구역까지 올라온 문서.
 
@@ -210,7 +239,7 @@ def main() -> None:
         ("basic", basic), ("header-in-body", header_in_body),
         ("repeated-label", repeated_label), ("indented-code", indented_code),
         ("repeated-image", repeated_image), ("two-columns", two_columns),
-        ("scanned", scanned), ("code-blocks", code_blocks),
+        ("scanned", scanned), ("code-blocks", code_blocks), ("kipo-notice", kipo_notice),
         ("tight-margin", tight_margin), ("stress", stress),
     ]:
         doc = builder()

@@ -247,6 +247,32 @@ test('진짜 반복 머리말·쪽번호는 그대로 지운다', () => {
   assert.doesNotMatch(md, /^-? ?\d+ ?-?$/m);          // 쪽번호
 });
 
+/* ---------------- 관공서 서식 ---------------- */
+
+test('쪽마다 되풀이되는 가장자리 로고·바코드는 빼고 본문 도면만 남긴다', () => {
+  const r = run('kipo-notice');
+  assert.equal(r.stats.images, 1, '머리말 로고와 꼬리말 바코드까지 뽑혔다');
+  assert.equal(r.assets.length, 1);
+  assert.match(r.markdown, /\[도면 1\\?\] 인용발명의 구성/);
+});
+
+test('가장자리 로고 제거는 머리말/꼬리말 옵션을 따른다', () => {
+  const r = run('kipo-notice', { stripHeaderFooter: false });
+  assert.ok(r.stats.images > 1, '옵션을 꺼도 로고가 빠졌다');
+});
+
+test('끝의 안내문을 잘라낸다', () => {
+  const off = run('kipo-notice');
+  assert.match(off.markdown, /안내/, '옵션이 꺼져 있으면 그대로 있어야 한다');
+
+  const on = run('kipo-notice', { trimNotice: true });
+  assert.match(on.markdown, /전기심사과 심사관 홍길동/, '심사관 줄까지는 남아야 한다');
+  assert.doesNotMatch(on.markdown, /안내/);
+  assert.doesNotMatch(on.markdown, /의견서 제출기간/);
+  assert.doesNotMatch(on.markdown, /기간연장/);
+  assert.ok(on.warnings.some((w) => w.includes('안내')), '잘랐으면 알려야 한다');
+});
+
 /* ---------------- 링크 주소 · YAML ---------------- */
 
 test('공백이나 짝 안 맞는 괄호가 든 주소도 링크로 살린다', () => {
