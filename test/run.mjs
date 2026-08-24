@@ -13,7 +13,7 @@ import { fileURLToPath } from 'node:url';
 
 import * as mupdf from 'mupdf';
 import { convert, escapeLeading, stripOuterEmphasis, stripMarkerSpans,
-         tableToMarkdown, tableToHtml } from '../src/converter.js';
+         tableToMarkdown, tableToHtml, yamlString, mdUrl } from '../src/converter.js';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const FIXTURES = path.join(HERE, 'fixtures');
@@ -212,6 +212,29 @@ test('목록처럼 보이는 코드 줄을 목록으로 바꾸지 않는다', ()
   }).join('\n');
   assert.doesNotMatch(outside, /not a list/);
   assert.doesNotMatch(codeBlocks.markdown, /`not a list`/);   // 인라인 코드로도 아니다
+});
+
+test('본문 속 고정폭 구간의 연속 공백을 뭉개지 않는다', () => {
+  // 정렬해 놓은 출력이나 명령줄이 한 칸으로 줄어들면 못 쓰게 된다
+  assert.match(codeBlocks.markdown, /`run {4}this {3}cmd`/);
+});
+
+/* ---------------- 링크 주소 · YAML ---------------- */
+
+test('공백이나 짝 안 맞는 괄호가 든 주소도 링크로 살린다', () => {
+  // CommonMark 는 <> 없는 주소에 공백을 허용하지 않는다 — 그대로 두면 링크가 아니다
+  assert.equal(mdUrl('https://ex.com/a b c'), 'https://ex.com/a%20b%20c');
+  assert.equal(mdUrl('https://ex.com/x)y'), 'https://ex.com/x%29y');
+  assert.equal(mdUrl('https://ex.com/(a'), 'https://ex.com/%28a');
+  // 짝이 맞는 괄호는 그대로 둔다 (CommonMark 가 알아서 읽는다)
+  assert.equal(mdUrl('https://ko.wikipedia.org/wiki/Foo_(bar)'), 'https://ko.wikipedia.org/wiki/Foo_(bar)');
+  assert.equal(mdUrl('https://ex.com/a<b>c'), 'https://ex.com/a%3Cb%3Ec');
+});
+
+test('YAML 머리말은 따옴표가 든 값에서도 깨지지 않는다', () => {
+  assert.equal(yamlString('2025 "Best" Report: a, b'), '"2025 \\"Best\\" Report: a, b"');
+  assert.equal(yamlString('back\\slash'), '"back\\\\slash"');
+  assert.equal(yamlString('여러\n줄\t탭'), '"여러 줄 탭"');
 });
 
 /* ---------------- 메모리 ---------------- */

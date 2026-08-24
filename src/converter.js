@@ -69,6 +69,22 @@ export function escapeMd(text) {
   return text.replace(/\\/g, '\\\\').replace(/([*_`[\]<>])/g, '\\$1');
 }
 
+/** Markdown 링크 주소로 쓸 수 있게 다듬는다.
+ *  공백이 든 주소는 CommonMark 에서 링크로 읽히지 않고, 짝이 맞지 않는 괄호는
+ *  링크가 끝나는 자리를 잘못 잡게 만든다. */
+export function mdUrl(url) {
+  let out = String(url)
+    .replace(/[\u0000-\u0020\u007f]/g, (ch) => encodeURIComponent(ch))
+    .replace(/</g, '%3C').replace(/>/g, '%3E');
+  let depth = 0, balanced = true;
+  for (const ch of out) {
+    if (ch === '(') depth++;
+    else if (ch === ')' && --depth < 0) { balanced = false; break; }
+  }
+  if (!balanced || depth !== 0) out = out.replace(/\(/g, '%28').replace(/\)/g, '%29');
+  return out;
+}
+
 const LEADING_NUM_RE = /^(\s*)(\d{1,9})([.)]\s)/;
 
 /** 문단 첫머리가 우연히 Markdown 문법으로 읽히는 것을 막는다.
@@ -88,6 +104,18 @@ export function stripOuterEmphasis(text) {
     }
   }
   return text;
+}
+
+/** YAML 큰따옴표 문자열로 안전하게 감싼다.
+ *  값에 따옴표나 역슬래시가 들어 있으면 감싸기만 해서는 문서가 깨진다. */
+export function yamlString(text) {
+  const body = String(text)
+    .replace(/\\/g, '\\\\')
+    .replace(/"/g, '\\"')
+    .replace(/[\u0000-\u001f\u007f]/g, ' ')   // 제어문자는 YAML 에 그대로 못 넣는다
+    .replace(/\s+/g, ' ')
+    .trim();
+  return `"${body}"`;
 }
 
 function htmlEscape(text) {
@@ -743,16 +771,21 @@ class Renderer {
       }
     }
 
-    let out = '';
+    // 조각을 [글자, 코드인지] 로 모았다가 마지막에 잇는다. 코드 구간 안의 연속 공백은
+    // 뭉개면 안 되므로(정렬된 출력·명령줄이 망가진다) 바깥 구간만 한 칸으로 줄인다.
+    const pieces = [];
+    let tail = '';
+    const emit = (text, isCode = false) => { if (text) { pieces.push({ text, isCode }); tail = text; } };
+
     let prevBox = null;
     for (const sp of merged) {
       const raw = sp.text;
-      if (!raw.trim()) { out += raw ? ' ' : ''; prevBox = sp.bbox; continue; }
+      if (!raw.trim()) { if (raw) emit(' '); prevBox = sp.bbox; continue; }
       // 조각 사이가 눈에 띄게 벌어져 있으면 공백을 되살린다
       // (PDF 는 칸을 띄울 때 공백 문자 없이 좌표만 옮기는 경우가 많다)
-      if (prevBox && !/\s$/.test(out) && !/^\s/.test(raw) &&
+      if (prevBox && !/\s$/.test(tail) && !/^\s/.test(raw) &&
           sp.bbox[0] - prevBox[2] > sp.size * 0.2) {
-        out += ' ';
+        emit(' ');
       }
       prevBox = sp.bbox;
       const lead = raw.slice(0, raw.length - raw.trimStart().length);
@@ -760,12 +793,14 @@ class Renderer {
       const core = raw.trim();
 
       let text;
+      let isCode = false;
       if (this.opt.inlineStyles && sp.mono) {
         let tick = '`';
         while (core.includes(tick)) tick += '`';
         // 내용이 백틱으로 시작/끝나면 공백을 덧대야 안쪽 백틱이 살아남는다
         const pad = core.startsWith('`') || core.endsWith('`') ? ' ' : '';
         text = `${tick}${pad}${core}${pad}${tick}`;
+        isCode = true;
       } else {
         text = escapeMd(core);
         if (this.opt.inlineStyles) {
@@ -774,10 +809,20 @@ class Renderer {
           else if (sp.italic) text = `*${text}*`;
         }
       }
-      if (this.opt.links && sp.link) text = `[${text}](${sp.link})`;
-      out += `${lead}${text}${trail}`;
+      if (this.opt.links && sp.link) text = `[${text}](${mdUrl(sp.link)})`;
+      emit(lead);
+      emit(text, isCode);
+      emit(trail);
     }
-    return out.replace(/[ \t]+/g, ' ').trim();
+
+    let out = '';
+    let plain = '';
+    const flushPlain = () => { out += plain.replace(/[ \t]+/g, ' '); plain = ''; };
+    for (const piece of pieces) {
+      if (piece.isCode) { flushPlain(); out += piece.text; } else plain += piece.text;
+    }
+    flushPlain();
+    return out.trim();
   }
 
   /** 같은 문단에 속한 줄들을 자연스럽게 잇는다. */
@@ -1133,11 +1178,11 @@ export function convert(mupdf, bytes, filename = 'document.pdf', options = {}) {
     let nTables = 0, nImages = 0, nHeadings = 0;
 
     if (opt.frontMatter) {
-      const fm = ['---', `source: "${filename}"`];
+      const fm = ['---', `source: ${yamlString(filename)}`];
       const title = tryMeta(doc, 'info:Title');
       const author = tryMeta(doc, 'info:Author');
-      if (title) fm.push(`title: "${normWs(title)}"`);
-      if (author) fm.push(`author: "${normWs(author)}"`);
+      if (normWs(title)) fm.push(`title: ${yamlString(title)}`);
+      if (normWs(author)) fm.push(`author: ${yamlString(author)}`);
       fm.push(`pages: ${pageCount}`, '---');
       out.push(fm.join('\n'));
     }

@@ -161,6 +161,9 @@ def code_blocks() -> pymupdf.Document:
             page.insert_text((55, y), line, fontname=MONO, fontsize=10)
         y += 16
     page.insert_text((55, y + 24), "마무리 문단.", fontname=KO, fontsize=10.5)
+    # 본문 안의 고정폭 구간 — 연속 공백이 한 칸으로 뭉개지면 안 된다
+    page.insert_text((55, y + 50), "실행:", fontname=KO, fontsize=10.5)
+    page.insert_text((90, y + 50), "run    this   cmd", fontname=MONO, fontsize=10)
     return doc
 
 
