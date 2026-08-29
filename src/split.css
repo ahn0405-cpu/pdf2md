@@ -1,0 +1,20 @@
+/* PDF 자르기 화면에만 필요한 부분. 공통 style.css 뒤에 온다. */
+.layout.single { grid-template-columns: minmax(0, 860px); justify-content: center; height: auto; }
+.limit-row { margin-top: 14px; }
+.limit { display: flex; align-items: center; gap: 10px; font-size: 13px; font-weight: 600; }
+.limit-field { display: inline-flex; align-items: center; gap: 6px; font-weight: 400; }
+.limit-field input {
+  width: 84px; padding: 6px 8px; font: inherit; text-align: right;
+  background: var(--panel-2); color: var(--text);
+  border: 1px solid var(--border); border-radius: 8px;
+}
+.limit-field input:disabled { opacity: .5; }
+.limit-hint { margin: 6px 0 0; color: var(--muted); font-size: 12px; }
+.parts { list-style: none; margin: 8px 0 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
+.part {
+  display: flex; align-items: center; gap: 8px;
+  padding: 4px 8px; border-radius: 7px; background: var(--panel-2);
+}
+.part-name { flex: 1; font-size: 12.5px; word-break: break-all; }
+.part-meta { color: var(--muted); font-size: 11.5px; white-space: nowrap; }
+.footnote { margin: 18px 0 0; color: var(--muted); font-size: 12px; line-height: 1.6; }

@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PDF 자르기 — 200MB 이하로</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ctext y='26' font-size='26'%3E%E2%9C%82%EF%B8%8F%3C/text%3E%3C/svg%3E">
+<link rel="stylesheet" href="style.css">
+<link rel="stylesheet" href="split.css">
+</head>
+<body>
+
+<header class="topbar">
+  <div class="brand">
+    <span class="logo">PDF<span class="arrow">✂</span>200MB</span>
+    <span class="tagline">NotebookLM에 올릴 수 있게 큰 PDF를 쪽 단위로 나눈다</span>
+  </div>
+  <button id="themeToggle" class="ghost" type="button" title="테마 전환">◐</button>
+</header>
+
+<main class="layout single">
+  <section class="pane">
+
+    <div id="drop" class="dropzone" tabindex="0" role="button"
+         aria-label="PDF 파일 선택 또는 끌어다 놓기">
+      <div class="drop-icon">⬇</div>
+      <p class="drop-title">PDF를 끌어다 놓거나 클릭해서 선택</p>
+      <p class="drop-sub">여러 개를 한 번에 고를 수 있습니다 · 폴더째 끌어와도 됩니다<br><b>파일은 이 브라우저 밖으로 나가지 않습니다</b> — 자르기는 전부 이 탭 안에서 일어납니다</p>
+      <input id="fileInput" type="file" accept="application/pdf,.pdf" multiple hidden>
+    </div>
+
+    <div class="limit-row">
+      <label class="limit">한 조각 최대 크기
+        <span class="limit-field">
+          <input id="limitInput" type="number" min="1" max="2000" step="1" value="190" autocomplete="off">
+          <span>MB</span>
+        </span>
+      </label>
+      <p class="limit-hint">
+        NotebookLM 한도는 200MB. 서비스마다 MB를 1,000,000 바이트로 세기도 해서
+        <b>190</b> 정도로 여유를 두는 편이 안전하다.
+      </p>
+    </div>
+
+    <details class="options">
+      <summary>자르기 옵션</summary>
+      <div class="opt-grid">
+        <label class="opt"><input type="checkbox" autocomplete="off" data-opt="name_range"><span>이름에 쪽 범위 넣기<em>보고서-01 (1-120쪽).pdf</em></span></label>
+        <label class="opt"><input type="checkbox" autocomplete="off" data-opt="auto_save"><span>나오는 대로 바로 저장<em>조각이 완성될 때마다 내려받는다. 브라우저가 여러 파일 저장을 한 번 물어본다</em></span></label>
+      </div>
+    </details>
+
+    <div class="actions">
+      <button id="splitBtn" class="primary" disabled>자르기 시작</button>
+      <button id="saveAllBtn" class="secondary" disabled>전체 저장</button>
+      <button id="clearBtn" class="ghost" disabled>목록 비우기</button>
+    </div>
+
+    <div id="summary" class="summary" hidden></div>
+    <ul id="fileList" class="filelist"></ul>
+
+    <p class="footnote">
+      쪽 하나는 더 쪼갤 수 없다. 그래서 한 쪽만으로도 한도를 넘는 문서(고해상도 스캔 등)는
+      그 쪽을 그대로 둔 채 알려 준다. 이럴 때는 스캔 해상도를 낮춰 다시 만들어야 한다.
+    </p>
+  </section>
+</main>
+
+<script type="module" src="split-app.js"></script>
+</body>
+</html>
