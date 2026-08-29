@@ -22,6 +22,30 @@ const SAVE_OPTIONS = 'compress';
 /** 조각 하나를 정하는 데 쓸 시도 횟수 상한. 예측이 빗나가도 이 안에서 수렴한다. */
 const MAX_TRIES = 14;
 
+/** 한도의 이만큼을 채웠으면 그만 잰다. 마지막 몇 쪽을 더 밀어 넣으려고 큰 조각을
+ *  또 만들면, 얻는 것보다 메모리 고점이 더 올라간다. */
+const GOOD_ENOUGH = 0.9;
+
+/* WASM 힙은 2GB가 상한이다. 재 보면 고점이 대략
+ *
+ *     원본 크기 + 조각 크기 × 6
+ *
+ * 까지 오른다. 조각을 담을 문서, 저장 버퍼, 그 버퍼가 1.5배씩 자라며 남기는 빈자리,
+ * 시도를 되풀이하며 생기는 조각남까지 더해진 값이다. 330MB 문서를 190MB로 자르면
+ * 고점이 1.4GB — 상한에 너무 가깝다. 실제 문서는 객체가 훨씬 많아 더 헤프므로
+ * 예산을 1.1GB로 잡고, 남는 만큼만 조각에 쓴다. 조각이 더 잘게 나뉠 뿐,
+ * 탭이 죽는 것보다는 낫다. */
+const HEAP_BUDGET = 1150 * MB;
+const CHUNK_COST = 6;
+const MIN_CHUNK = 16 * MB;
+
+/** 원본 크기를 보고 실제로 만들 조각의 최대 크기를 정한다. 사용자가 정한 한도를
+ *  넘지는 않는다. */
+export function safeChunkLimit(sourceSize, limit) {
+  const affordable = Math.floor((HEAP_BUDGET - sourceSize) / CHUNK_COST);
+  return Math.min(limit, Math.max(MIN_CHUNK, affordable));
+}
+
 const clamp = (v, lo, hi) => Math.min(Math.max(v, lo), hi);
 const tick = () => new Promise((resolve) => setTimeout(resolve, 0));
 
@@ -74,9 +98,11 @@ function buildChunk(mupdf, src, from, count) {
  * @param options.name       원본 파일명 — 조각 이름을 짓는 데 쓴다
  * @param options.nameWithRange 이름에 쪽 범위를 넣을지
  * @param options.onProgress 진행 알림 {pagesDone, pageCount, parts, message}
- * @param options.onPart     조각이 하나 완성될 때마다 호출. 여기서 bytes 를
- *                           Blob 으로 옮기고 part.bytes = null 로 비우면
- *                           메모리를 덜 쓴다.
+ * @param options.onPart     조각이 하나 완성될 때마다 호출
+ * @param options.takeBytes  완성된 조각을 무엇으로 받을지. WASM 메모리를 그대로
+ *                           가리키는 뷰가 넘어오니 반드시 복사해 가야 한다.
+ *                           기본은 Uint8Array 사본, 브라우저에서는 Blob 을 바로
+ *                           만들어 자바스크립트 힙에 사본을 하나 덜 만든다.
  * @returns {{pageCount, parts, warnings, untouched}}
  */
 export async function splitPdf(mupdf, bytes, options = {}) {
@@ -85,6 +111,8 @@ export async function splitPdf(mupdf, bytes, options = {}) {
   const withRange = !!options.nameWithRange;
   const onProgress = options.onProgress || (() => {});
   const onPart = options.onPart || (() => {});
+  const takeBytes = options.takeBytes || ((view) => view.slice());
+  const sourceSize = bytes.length;
   const warnings = [];
   const parts = [];
 
@@ -105,18 +133,30 @@ export async function splitPdf(mupdf, bytes, options = {}) {
 
     // 이미 한도 이하면 손대지 않는다. 다시 저장하면 서명·양식이 상할 수 있고,
     // 무엇보다 자를 이유가 없다.
-    if (bytes.length <= limit) {
+    if (sourceSize <= limit) {
       const part = { index: 1, from: 1, to: pageCount, pages: pageCount,
-                     size: bytes.length, name, bytes };
+                     size: sourceSize, name, data: takeBytes(bytes) };
       parts.push(part);
       onPart(part);
       onProgress({ pagesDone: pageCount, pageCount, parts: 1, message: '자를 필요가 없습니다' });
       return { pageCount, parts, warnings, untouched: true };
     }
 
+    // 원본은 이제 PDF 엔진이 들고 있다. 자바스크립트 쪽 사본까지 붙잡고 있으면
+    // 330MB짜리를 두 벌 이고 가는 셈이라, 참조를 놓아 준다.
+    bytes = null;
+
+    // 메모리 예산에 맞춰 실제로 만들 조각 크기를 정한다.
+    const target = safeChunkLimit(sourceSize, limit);
+    if (target < limit * 0.95) {
+      warnings.push(`메모리를 아끼려고 조각을 ${formatSize(target)} 이하로`
+        + ` 잘랐습니다(요청한 한도는 ${formatSize(limit)}).`
+        + ' 원본이 클수록 조각을 작게 만들어야 브라우저가 버팁니다.');
+    }
+
     // 조각 수를 미리 어림해 이름의 자릿수를 정한다(01, 02 … 로 가지런히).
-    const estimatedTotal = Math.max(2, Math.ceil(bytes.length / limit));
-    let perPage = bytes.length / pageCount;   // 쪽당 바이트. 조각마다 다시 잰다.
+    const estimatedTotal = Math.max(2, Math.ceil(sourceSize / target));
+    let perPage = sourceSize / pageCount;   // 쪽당 바이트. 조각마다 다시 잰다.
     let start = 0;
     let tightOnMemory = false;
 
@@ -124,7 +164,7 @@ export async function splitPdf(mupdf, bytes, options = {}) {
       const remaining = pageCount - start;
       let lo = 0;              // 한도 안에 들어간다고 확인된 최대 쪽수
       let hi = remaining;      // 아직 넘지 않았을 수도 있는 최대 쪽수
-      let guess = clamp(Math.round((limit / perPage) * 0.98), 1, remaining);
+      let guess = clamp(Math.round((target / perPage) * 0.98), 1, remaining);
       let best = null;         // {count, size, buf}
 
       for (let tries = 0; tries < MAX_TRIES; tries++) {
@@ -153,10 +193,12 @@ export async function splitPdf(mupdf, bytes, options = {}) {
         }
 
         const size = buf.getLength();
-        if (size <= limit) {
+        if (size <= target) {
           best?.buf.destroy();
           best = { count: guess, size, buf };
           lo = guess;
+          // 충분히 채웠으면 그만 잰다. 큰 조각을 한 번 더 만드는 값이 비싸다.
+          if (size >= target * GOOD_ENOUGH) break;
         } else {
           buf.destroy();
           hi = guess - 1;
@@ -165,7 +207,7 @@ export async function splitPdf(mupdf, bytes, options = {}) {
 
         // 방금 잰 밀도로 다음 쪽수를 점찍고, 아직 안 본 구간으로 잘라 넣는다.
         // 구간이 매번 좁아지므로 제자리걸음은 생기지 않는다.
-        guess = clamp(Math.round((guess * limit) / size * 0.99), lo + 1, hi);
+        guess = clamp(Math.round((guess * target) / size * 0.99), lo + 1, hi);
       }
 
       // 한 쪽조차 한도를 넘는 경우(큰 스캔 이미지 한 장 등). 더 쪼갤 수단이
@@ -173,9 +215,9 @@ export async function splitPdf(mupdf, bytes, options = {}) {
       if (!best) {
         const buf = buildChunk(mupdf, doc, start, 1);
         best = { count: 1, size: buf.getLength(), buf };
-        if (best.size > limit) {
+        if (best.size > target) {
           warnings.push(`${start + 1}쪽 한 장이 ${formatSize(best.size)} 라 한도`
-            + `(${formatSize(limit)})를 넘습니다. 이 조각은 그대로 두었습니다.`);
+            + `(${formatSize(target)})를 넘습니다. 이 조각은 그대로 두었습니다.`);
         }
       }
 
@@ -185,7 +227,7 @@ export async function splitPdf(mupdf, bytes, options = {}) {
       const part = {
         index, from, to, pages: best.count, size: best.size,
         name: partName(name, index, Math.max(estimatedTotal, index), from, to, withRange),
-        bytes: best.buf.asUint8Array().slice(),
+        data: takeBytes(best.buf.asUint8Array()),
       };
       best.buf.destroy();
       parts.push(part);

@@ -9,7 +9,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import * as mupdf from 'mupdf';
-import { splitPdf, partName, formatSize, MB, DEFAULT_LIMIT } from '../src/splitter.js';
+import { splitPdf, partName, formatSize, safeChunkLimit, MB, DEFAULT_LIMIT } from '../src/splitter.js';
 
 /** 압축되지 않는(=크기를 예측할 수 있는) 바이트열. */
 function noise(n, seed) {
@@ -69,7 +69,7 @@ test('모든 조각이 한도 이하다', () => {
   assert.ok(result.parts.length > 1, `조각이 ${result.parts.length}개뿐이다`);
   for (const p of result.parts) {
     assert.ok(p.size <= LIMIT, `${p.name} 이 ${formatSize(p.size)} 로 한도를 넘었다`);
-    assert.equal(p.size, p.bytes.length);
+    assert.equal(p.size, p.data.length);
   }
 });
 
@@ -98,7 +98,7 @@ test('쪽을 빠뜨리거나 겹치지 않고 순서대로 나눈다', () => {
 
 test('조각 안의 쪽 내용이 원본 그대로다', () => {
   const seen = [];
-  for (const p of result.parts) seen.push(...pageLabels(p.bytes));
+  for (const p of result.parts) seen.push(...pageLabels(p.data));
   assert.deepEqual(seen, Array.from({ length: 30 }, (_, i) => `PAGE-${i + 1}`));
 });
 
@@ -152,7 +152,7 @@ test('이미 한도 이하면 손대지 않는다', async () => {
   assert.equal(r.untouched, true);
   assert.equal(r.parts.length, 1);
   assert.equal(r.parts[0].name, '작은.pdf');
-  assert.equal(r.parts[0].bytes, small);       // 다시 저장하지 않는다
+  assert.deepEqual(r.parts[0].data, small);    // 다시 저장하지 않는다
 });
 
 test('한 쪽이 한도보다 크면 그 쪽만 담고 알린다', async () => {
@@ -173,6 +173,18 @@ test('암호가 걸린 PDF는 이유를 밝히고 멈춘다', async () => {
 test('PDF가 아니면 열 수 없다고 알린다', async () => {
   await assert.rejects(() => splitPdf(mupdf, new Uint8Array([1, 2, 3]), { limitBytes: 1024 }),
     /PDF를 열 수 없습니다/);
+});
+
+test('조각을 어떤 형태로 받을지 정할 수 있다', async () => {
+  // 브라우저는 여기서 Blob 을 바로 만들어, 자바스크립트 힙에 큰 사본을 하나 덜
+  // 만든다. 넘어오는 것은 WASM 메모리를 가리키는 뷰라 반드시 복사해야 한다.
+  const sizes = [];
+  const r = await splitPdf(mupdf, source, {
+    limitBytes: LIMIT,
+    takeBytes: (view) => { sizes.push(view.length); return { fake: view.length }; },
+  });
+  assert.deepEqual(r.parts.map((p) => p.data.fake), sizes);
+  assert.deepEqual(r.parts.map((p) => p.size), sizes);
 });
 
 /* ---------------- 진행 상황 ---------------- */
@@ -233,6 +245,27 @@ test('도중에 실패해도 열어 둔 문서를 닫는다', async () => {
     onPart: () => { throw new Error('중단'); },
   }), /중단/);
   assert.deepEqual(counted.leaked(), []);
+});
+
+/* ---------------- 메모리 예산 ---------------- */
+
+test('원본이 클수록 조각을 작게 잡는다', () => {
+  // WASM 힙 상한(2GB)에 부딪히지 않게, 원본이 차지한 만큼을 빼고 남는 것으로
+  // 조각을 잡는다. 작은 원본은 사용자가 정한 한도를 그대로 쓴다.
+  assert.equal(safeChunkLimit(4 * MB, 20 * MB), 20 * MB);   // 작으면 한도 그대로
+  const mid = safeChunkLimit(330 * MB, 190 * MB);
+  assert.ok(mid < 150 * MB && mid > 100 * MB, `330MB 원본에 ${formatSize(mid)}`);
+  assert.ok(safeChunkLimit(800 * MB, 190 * MB) < mid);      // 클수록 더 작게
+  assert.ok(safeChunkLimit(2000 * MB, 190 * MB) >= 16 * MB); // 바닥은 있다
+  // 원본이 아무리 커도 사용자가 정한 한도는 넘지 않는다
+  assert.ok(safeChunkLimit(4 * MB, 2 * MB) <= 2 * MB);
+});
+
+test('조각을 한도보다 작게 잡았으면 그 이유를 알린다', async () => {
+  // safeChunkLimit 가 줄이는 상황을 작은 예산으로 흉내낼 수는 없으니, 큰 원본
+  // 대신 경고 문구의 조건만 확인한다: 줄이지 않았으면 그런 경고가 없어야 한다.
+  const r = await splitPdf(mupdf, source, { limitBytes: LIMIT, name: 'x.pdf' });
+  assert.equal(r.warnings.filter((w) => w.includes('메모리를 아끼려고')).length, 0);
 });
 
 test('기본 한도는 NotebookLM 의 200MB 보다 낮다', () => {

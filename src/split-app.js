@@ -1,6 +1,6 @@
 /* PDF 자르기 : 브라우저에서만 동작하는 UI.
  * 파일은 이 페이지 밖으로 전송되지 않는다. 자르기는 전부 이 탭 안에서 일어난다. */
-import { splitPdf, formatSize, isOutOfMemory, MB, DEFAULT_LIMIT } from './splitter.js';
+import { splitPdf, formatSize, isOutOfMemory, safeChunkLimit, MB, DEFAULT_LIMIT } from './splitter.js';
 import { loadMupdf } from './mupdf-runtime.js';
 
 const $ = (id) => document.getElementById(id);
@@ -14,9 +14,9 @@ let uidSeq = 0;
 let running = false;
 let mupdf = null;
 
-/* WASM 힙은 2GB가 상한이다. 원본과 만들던 조각이 함께 올라가므로 그 절반쯤부터
- * 위태롭다. 미리 알려 주기 위한 기준. */
-const HUGE = 900 * MB;
+/* 이만큼부터는 시간이 꽤 걸리고, 메모리를 아끼려고 조각도 한도보다 작아진다.
+ * 시작하기 전에 미리 알려 준다. */
+const HUGE = 300 * MB;
 
 /* ---------------- 테마 ---------------- */
 const savedTheme = localStorage.getItem('pdf2md-theme');
@@ -249,7 +249,9 @@ function updateSummary() {
   const parts = files.reduce((a, f) => a + f.parts.length, 0);
   const bits = [`파일 ${files.length}개`];
   if (waiting.length) {
-    const guess = waiting.reduce((a, f) => a + Math.max(1, Math.ceil(f.file.size / limit)), 0);
+    // 큰 원본은 메모리를 아끼려고 한도보다 작게 자른다. 예상 개수도 그 기준으로.
+    const guess = waiting.reduce((a, f) => a + (f.file.size <= limit ? 1
+      : Math.ceil(f.file.size / safeChunkLimit(f.file.size, limit))), 0);
     bits.push(`한도 ${formatSize(limit)} 기준 약 ${guess}조각 예상`);
   }
   if (parts) bits.push(`조각 ${parts}개 완성`);
@@ -298,14 +300,14 @@ async function splitOne(item, opts) {
   const limit = limitBytes();
   try {
     if (item.file.size > HUGE) {
-      item.note = '아주 큰 파일입니다. 시간이 걸리고 중간에 멈춘 것처럼 보일 수 있습니다.';
+      item.note = '큰 파일입니다. 몇 분 걸릴 수 있고, 그동안 화면이 멈춘 것처럼 보입니다.';
       renderList();
       await new Promise((r) => setTimeout(r, 0));
     }
-    const bytes = new Uint8Array(await item.file.arrayBuffer());
+    let bytes = new Uint8Array(await item.file.arrayBuffer());
     const started = performance.now();
 
-    const result = await splitPdf(mupdf, bytes, {
+    const job = splitPdf(mupdf, bytes, {
       limitBytes: limit,
       name: item.file.name,
       nameWithRange: opts.name_range,
@@ -315,15 +317,18 @@ async function splitOne(item, opts) {
         const el = item.el?.querySelector('.item-meta');
         if (el) el.textContent = item.note; else renderList();
       },
+      // WASM 메모리를 가리키는 뷰에서 곧장 Blob 을 만든다. 자바스크립트 힙에
+      // 조각만 한 사본을 하나 덜 만든다.
+      takeBytes: (view) => new Blob([view], { type: 'application/pdf' }),
       onPart: (part) => {
-        // 원본 바이트는 Blob 으로 옮기고 놓아 준다
-        part.blob = new Blob([part.bytes], { type: 'application/pdf' });
-        part.bytes = null;
         item.parts.push(part);
         if (opts.auto_save) savePart(part);
         renderList();
       },
     });
+    // 원본은 PDF 엔진이 들고 있다. 이쪽 사본은 붙잡고 있을 이유가 없다.
+    bytes = null;
+    const result = await job;
 
     item.warnings = result.warnings;
     item.status = result.untouched ? 'skip' : 'done';
@@ -355,8 +360,8 @@ function saveBlob(blob, filename) {
 }
 
 function savePart(part) {
-  if (!part.blob) return;
-  saveBlob(part.blob, part.name);
+  if (!part.data) return;
+  saveBlob(part.data, part.name);
 }
 
 saveAllBtn.onclick = async () => {
