@@ -1,6 +1,7 @@
 /* PDF 자르기 : 브라우저에서만 동작하는 UI.
  * 파일은 이 페이지 밖으로 전송되지 않는다. 자르기는 전부 이 탭 안에서 일어난다. */
 import { splitPdf, formatSize, isOutOfMemory, safeChunkLimit, MB, DEFAULT_LIMIT } from './splitter.js';
+import { collectPdfs, ensureWritable, supportsFolders, writeFile } from './folder.js';
 import { loadMupdf } from './mupdf-runtime.js';
 
 const $ = (id) => document.getElementById(id);
@@ -8,8 +9,10 @@ const $ = (id) => document.getElementById(id);
 const drop = $('drop'), fileInput = $('fileInput'), listEl = $('fileList');
 const splitBtn = $('splitBtn'), saveAllBtn = $('saveAllBtn'), clearBtn = $('clearBtn');
 const limitInput = $('limitInput'), summaryEl = $('summary');
+const folderRow = $('folderRow'), folderBtn = $('folderBtn');
 
-let files = [];      // {uid, file, status, parts, warnings, error, note, el}
+// dir 는 조각을 쓸 폴더 손잡이(원본이 있던 폴더). 없으면 내려받기로 떨어진다.
+let files = [];      // {uid, file, dir, status, parts, warnings, error, note, el}
 let uidSeq = 0;
 let running = false;
 let mupdf = null;
@@ -69,9 +72,12 @@ drop.addEventListener('keydown', (e) => {
   if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); fileInput.click(); }
 });
 fileInput.addEventListener('change', () => {
-  addFiles([...fileInput.files]);
+  addFiles(asEntries([...fileInput.files]));
   fileInput.value = '';
 });
+
+/** 폴더를 모르는 경로로 들어온 파일들. 조각은 내려받기로 간다. */
+const asEntries = (list) => list.map((file) => ({ file, dir: null }));
 
 ['dragenter', 'dragover'].forEach((ev) =>
   drop.addEventListener(ev, (e) => { e.preventDefault(); drop.classList.add('over'); }));
@@ -87,9 +93,9 @@ drop.addEventListener('drop', (e) => {
       const entry = item.webkitGetAsEntry();
       if (entry) entries.push(entry);
     }
-    walkEntries(entries).then(addFiles);
+    walkEntries(entries).then((list) => addFiles(asEntries(list)));
   } else {
-    addFiles([...dt.files]);
+    addFiles(asEntries([...dt.files]));
   }
 });
 window.addEventListener('dragover', (e) => e.preventDefault());
@@ -115,17 +121,48 @@ function walkEntries(entries) {
 }
 
 function addFiles(incoming) {
-  const pdfs = incoming.filter((f) => /\.pdf$/i.test(f.name) || f.type === 'application/pdf');
+  const pdfs = incoming.filter(({ file }) =>
+    /\.pdf$/i.test(file.name) || file.type === 'application/pdf');
   let skipped = incoming.length - pdfs.length;
-  pdfs.sort((a, b) => a.name.localeCompare(b.name, 'ko'));
+  pdfs.sort((a, b) => a.file.name.localeCompare(b.file.name, 'ko'));
 
-  for (const f of pdfs) {
-    if (files.some((x) => x.file.name === f.name && x.file.size === f.size)) { skipped++; continue; }
-    files.push({ uid: ++uidSeq, file: f, status: 'wait', parts: [], warnings: [], error: null, note: '' });
+  for (const { file, dir } of pdfs) {
+    if (files.some((x) => x.file.name === file.name && x.file.size === file.size)) { skipped++; continue; }
+    files.push({ uid: ++uidSeq, file, dir, status: 'wait', parts: [], warnings: [], error: null, note: '' });
   }
   renderList();
   if (skipped) toast(`PDF가 아니거나 중복인 파일 ${skipped}개를 건너뛰었습니다.`);
 }
+
+/* ---------------- 폴더 열기 ---------------- */
+if (supportsFolders()) folderRow.hidden = false;
+
+folderBtn.onclick = async () => {
+  let dir;
+  try {
+    dir = await showDirectoryPicker({ mode: 'readwrite' });
+  } catch (err) {
+    if (err?.name !== 'AbortError') toast(`폴더를 열지 못했습니다: ${err.message || err}`);
+    return;
+  }
+  if (!await ensureWritable(dir)) {
+    toast('그 폴더에 쓸 권한을 받지 못했습니다. 조각을 원본 자리에 저장할 수 없습니다.');
+    return;
+  }
+  folderBtn.disabled = true;
+  folderBtn.textContent = '읽는 중…';
+  try {
+    const found = await collectPdfs(dir);
+    if (!found.length) { toast('그 폴더에서 PDF를 찾지 못했습니다.'); return; }
+    addFiles(found);
+    toast(`PDF ${found.length}개를 가져왔습니다. 조각은 원본이 있던 폴더에 저장됩니다.`);
+  } catch (err) {
+    toast(`폴더를 읽지 못했습니다: ${err.message || err}`);
+  } finally {
+    folderBtn.disabled = false;
+    folderBtn.textContent = '폴더 열기…';
+  }
+};
 
 /* ---------------- 목록 ---------------- */
 const BADGE = {
@@ -182,6 +219,13 @@ function renderList() {
       li.appendChild(note);
     }
 
+    if (item.dir) {
+      const dest = document.createElement('div');
+      dest.className = 'item-dest';
+      dest.textContent = `📁 ${item.dir.name} 폴더에 저장`;
+      li.appendChild(dest);
+    }
+
     if (item.parts.length) {
       const parts = document.createElement('ul');
       parts.className = 'parts';
@@ -229,7 +273,14 @@ function renderPart(part) {
   dl.title = `${part.name} 내려받기`;
   dl.onclick = () => savePart(part);
 
-  li.append(name, meta, dl);
+  li.append(name, meta);
+  if (part.saved || part.saveError) {
+    const state = document.createElement('span');
+    state.className = 'part-state' + (part.saveError ? ' fail' : '');
+    state.textContent = part.saveError ? `✕ ${part.saveError}` : '저장됨';
+    li.append(state);
+  }
+  li.append(dl);
   return li;
 }
 
@@ -238,6 +289,7 @@ function updateButtons() {
   splitBtn.disabled = running || !files.some((f) => f.status === 'wait');
   splitBtn.textContent = running ? '자르는 중…' : '자르기 시작';
   saveAllBtn.disabled = running || !saved.length;
+  saveAllBtn.title = '조각을 브라우저의 내려받기 폴더로 따로 저장합니다';
   clearBtn.disabled = running || !files.length;
   limitInput.disabled = running;
 }
@@ -306,6 +358,7 @@ async function splitOne(item, opts) {
     }
     let bytes = new Uint8Array(await item.file.arrayBuffer());
     const started = performance.now();
+    const writes = [];
 
     const job = splitPdf(mupdf, bytes, {
       limitBytes: limit,
@@ -322,20 +375,27 @@ async function splitOne(item, opts) {
       takeBytes: (view) => new Blob([view], { type: 'application/pdf' }),
       onPart: (part) => {
         item.parts.push(part);
-        if (opts.auto_save) savePart(part);
+        // 원본이 있던 폴더가 있으면 그 자리에 바로 쓴다. 쓰기는 기다리지 않고
+        // 다음 조각을 계속 만든다(디스크는 느리고 CPU 는 놀 이유가 없다).
+        // 자를 필요가 없던 파일은 이름이 원본과 같다 — 제 자신을 덮어쓰지 않는다.
+        if (item.dir && part.name !== item.file.name) writes.push(writePart(item, part));
+        else if (opts.auto_save) savePart(part);
         renderList();
       },
     });
     // 원본은 PDF 엔진이 들고 있다. 이쪽 사본은 붙잡고 있을 이유가 없다.
     bytes = null;
     const result = await job;
+    await Promise.all(writes);
 
     item.warnings = result.warnings;
     item.status = result.untouched ? 'skip' : 'done';
     const elapsed = (performance.now() - started) / 1000;
+    const saved = item.parts.filter((p) => p.saved).length;
     item.note = result.untouched
       ? `${result.pageCount}쪽 · ${formatSize(item.file.size)} — 이미 한도 이하라 그대로 둡니다`
-      : `${result.pageCount}쪽 → ${result.parts.length}조각 · ${elapsed.toFixed(1)}초`;
+      : `${result.pageCount}쪽 → ${result.parts.length}조각 · ${elapsed.toFixed(1)}초`
+        + (saved ? ` · ${saved}개를 원본 폴더에 저장` : '');
   } catch (err) {
     item.status = 'fail';
     item.note = '';
@@ -357,6 +417,18 @@ function saveBlob(blob, filename) {
   a.click();
   a.remove();
   setTimeout(() => URL.revokeObjectURL(url), 8000);
+}
+
+/** 조각을 원본이 있던 폴더에 쓴다. 실패해도 자르기 자체는 계속한다 —
+ *  ⬇ 로 내려받으면 되니까. */
+async function writePart(item, part) {
+  try {
+    await writeFile(item.dir, part.name, part.data);
+    part.saved = true;
+  } catch (err) {
+    part.saveError = err.message || String(err);
+  }
+  renderList();
 }
 
 function savePart(part) {

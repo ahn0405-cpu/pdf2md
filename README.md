@@ -82,6 +82,12 @@ NotebookLM 은 소스 파일 하나가 200MB를 넘으면 받아 주지 않는�
 `dist/pdfsplit.html` 을 크롬에서 열고 PDF를 끌어다 놓으면, 한도 안에 들어오는
 여러 개의 PDF로 나눠 준다. 여기도 파일은 브라우저 밖으로 나가지 않는다.
 
+- **원본이 있던 폴더에 그대로 저장한다.** `폴더 열기…` 로 폴더를 고르면 그 안(하위
+  폴더까지)의 PDF를 모두 가져오고, 자른 조각을 각자 원본이 있던 자리에 바로 쓴다.
+  내려받기 폴더를 거치지 않고, 저장 위치를 파일마다 묻지도 않는다.
+  (크롬 계열만 된다. 안 되는 브라우저에서는 이 버튼이 보이지 않고 내려받기로 떨어진다.
+  끌어다 놓거나 파일 선택창으로 넣은 파일도 내려받기로 간다 — 브라우저가 그 파일이
+  어느 폴더에서 왔는지 알려 주지 않기 때문이다.)
 - **쪽 단위로만 나눈다.** 원본의 글자·이미지·링크를 그대로 옮겨 담을 뿐,
   다시 그리거나 화질을 낮추지 않는다.
 - **한도를 꽉 채운다.** 쪽수와 파일 크기는 비례하지 않는다(쪽들이 글꼴·이미지를
@@ -99,6 +105,9 @@ NotebookLM 은 소스 파일 하나가 200MB를 넘으면 받아 주지 않는�
 
 ### 알아둘 점
 
+- 폴더에 쓸 때 **같은 이름의 조각이 이미 있으면 덮어쓴다**. 다시 자를 때마다
+  찌꺼기가 쌓이지 않게 한 것이다. 조각 이름은 `원본이름-01.pdf` 꼴이라 원본을
+  건드리지 않는다.
 - **쪽 하나는 더 쪼갤 수 없다.** 고해상도 스캔처럼 한 쪽만으로 한도를 넘는
   문서는 그 쪽을 그대로 둔 채 경고를 띄운다. 스캔 해상도를 낮춰 다시 만들어야 한다.
 - **조각 합계는 원본보다 조금 크다.** 쪽들이 함께 쓰던 글꼴·양식은 조각마다
@@ -126,7 +135,7 @@ NotebookLM 은 소스 파일 하나가 200MB를 넘으면 받아 주지 않는�
 
 ```bash
 npm install
-npm test         # 회귀 테스트 57건
+npm test         # 회귀 테스트 65건
 npm run build    # dist/pdf2md.html · dist/pdfsplit.html 생성
 ```
 
@@ -135,12 +144,13 @@ npm run build    # dist/pdf2md.html · dist/pdfsplit.html 생성
 | `src/converter.js` | 변환 로직 (레이아웃 분석 · Markdown 생성) |
 | `src/app.js` | 변환기 UI |
 | `src/splitter.js` | 자르기 로직 (한도에 맞는 쪽수 찾기) |
+| `src/folder.js` | 폴더를 직접 읽고 쓰기 (File System Access API) |
 | `src/split-app.js`, `src/split.html`, `src/split.css` | 자르기 화면 |
 | `src/markdown.js` | 미리보기용 소형 마크다운 렌더러 |
 | `src/zip.js` | 브라우저에서 ZIP 만들기 |
 | `src/index.html`, `src/style.css` | 변환기 화면 · 공통 스타일 |
 | `build.mjs` | 각 화면을 단일 HTML로 묶는다 (WASM은 gzip 후 base64로 인라인) |
-| `test/run.mjs`, `test/split.mjs` | 회귀 테스트 |
+| `test/run.mjs`, `test/split.mjs`, `test/folder.mjs` | 회귀 테스트 |
 | `test/fixtures/` | 테스트용 PDF (`test/make-fixtures.py` 로 생성, PyMuPDF 필요) |
 
 개발 중에는 정적 서버로 `src/` 를 열어도 된다(`npx http-server src`).

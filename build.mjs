@@ -92,6 +92,15 @@ function buildPage(shared, page, modules, outName) {
   const app = modules
     .map((name) => moduleToIife(name, read(path.join(SRC, `${name}.js`))))
     .join('\n');
+  // 모듈 하나를 목록에서 빠뜨리면 참조가 조용히 undefined 가 된다(화면이 그냥
+  // 안 뜬다). 빌드 때 잡는다. mupdf_runtime 은 위 공통 코드가 넣어 준다.
+  const defined = new Set([...modules.map((n) => n.replace(/\W/g, '_')), 'mupdf_runtime']);
+  for (const [, id] of app.matchAll(/__ns_([A-Za-z0-9_]+)/g)) {
+    if (!defined.has(id)) {
+      throw new Error(`${page}: '${id}' 모듈이 빌드 목록에 없습니다.`);
+    }
+  }
+
   const script = [shared, app].join('\n');
 
   let html = read(path.join(SRC, page));
@@ -147,7 +156,7 @@ const __ns_mupdf_runtime = { loadMupdf: async () => __mupdfNamespace };
 
   // 의존 순서대로 (마지막 모듈이 나머지를 가져다 쓴다)
   buildPage(shared, 'index.html', ['markdown', 'zip', 'converter', 'app'], 'pdf2md.html');
-  buildPage(shared, 'split.html', ['splitter', 'split-app'], 'pdfsplit.html');
+  buildPage(shared, 'split.html', ['folder', 'splitter', 'split-app'], 'pdfsplit.html');
 
   console.log(`WASM ${(wasm.length / 1048576).toFixed(1)} MB → gzip ${(gz.length / 1048576).toFixed(1)} MB`);
 }
