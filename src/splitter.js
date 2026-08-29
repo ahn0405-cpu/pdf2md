@@ -39,14 +39,29 @@ export function partName(originalName, index, total, from, to, withRange = false
   return withRange ? `${base}-${num} (${from}-${to}쪽).pdf` : `${base}-${num}.pdf`;
 }
 
+/** 메모리가 모자라 실패했는가. MuPDF 는 WASM 힙이 차면 realloc/malloc 실패로
+ *  알려 온다. 문서가 잘못된 것이 아니므로 더 작게 잘라 다시 시도할 수 있다. */
+export function isOutOfMemory(err) {
+  return /realloc|malloc|out of memory|allocat/i.test(String(err?.message || err));
+}
+
 /** 원본에서 from(0-기준)부터 count 쪽을 떼어낸 PDF를 만들어 버퍼로 돌려준다.
- *  saveToBuffer 의 결과는 문서와 별개라, 문서는 바로 돌려줘도 된다. */
+ *
+ * 반드시 graft map 을 하나 만들어 그 위에서 옮긴다. 쪽마다 graftPage 를 따로
+ * 부르면 MuPDF 가 매번 새 map 을 만들어, 쪽들이 함께 쓰는 글꼴·이미지를 쪽 수만큼
+ * 복제한다(20MB를 함께 쓰는 20쪽 → 40MB 가 아니라 420MB). 큰 문서에서는 곧바로
+ * WASM 힙 상한(2GB)에 부딪힌다.
+ *
+ * saveToBuffer 의 결과는 문서와 별개라, 문서는 바로 돌려줘도 된다.
+ */
 function buildChunk(mupdf, src, from, count) {
   const dst = new mupdf.PDFDocument();
+  const map = dst.newGraftMap();
   try {
-    for (let i = 0; i < count; i++) dst.graftPage(-1, src, from + i);
+    for (let i = 0; i < count; i++) map.graftPage(-1, src, from + i);
     return dst.saveToBuffer(SAVE_OPTIONS);
   } finally {
+    map.destroy();
     dst.destroy();
   }
 }
@@ -103,6 +118,7 @@ export async function splitPdf(mupdf, bytes, options = {}) {
     const estimatedTotal = Math.max(2, Math.ceil(bytes.length / limit));
     let perPage = bytes.length / pageCount;   // 쪽당 바이트. 조각마다 다시 잰다.
     let start = 0;
+    let tightOnMemory = false;
 
     while (start < pageCount) {
       const remaining = pageCount - start;
@@ -118,7 +134,24 @@ export async function splitPdf(mupdf, bytes, options = {}) {
         });
         await tick();
 
-        const buf = buildChunk(mupdf, doc, start, guess);
+        let buf;
+        try {
+          buf = buildChunk(mupdf, doc, start, guess);
+        } catch (err) {
+          // 메모리가 모자란 것뿐이면 절반으로 줄여 다시 해 본다. 조각이 더
+          // 잘게 나뉠 뿐 결과는 쓸 수 있다.
+          if (!isOutOfMemory(err) || guess <= 1) throw err;
+          hi = Math.min(hi, guess - 1);
+          if (!tightOnMemory) {
+            tightOnMemory = true;
+            warnings.push('메모리가 모자라 조각을 한도보다 작게 잘랐습니다.'
+              + ' 다른 탭을 닫고 다시 하면 조각 수가 줄어듭니다.');
+          }
+          if (lo >= hi) break;
+          guess = clamp(Math.floor(guess / 2), lo + 1, hi);
+          continue;
+        }
+
         const size = buf.getLength();
         if (size <= limit) {
           best?.buf.destroy();

@@ -1,6 +1,6 @@
 /* PDF 자르기 : 브라우저에서만 동작하는 UI.
  * 파일은 이 페이지 밖으로 전송되지 않는다. 자르기는 전부 이 탭 안에서 일어난다. */
-import { splitPdf, formatSize, MB, DEFAULT_LIMIT } from './splitter.js';
+import { splitPdf, formatSize, isOutOfMemory, MB, DEFAULT_LIMIT } from './splitter.js';
 import { loadMupdf } from './mupdf-runtime.js';
 
 const $ = (id) => document.getElementById(id);
@@ -334,8 +334,9 @@ async function splitOne(item, opts) {
   } catch (err) {
     item.status = 'fail';
     item.note = '';
-    item.error = String(err?.message || err).includes('memory')
-      ? 'PDF 엔진의 메모리 한계(2GB)를 넘었습니다. 다른 도구로 절반쯤 나눈 뒤 다시 시도하세요.'
+    item.error = isOutOfMemory(err)
+      ? `PDF 엔진의 메모리 한계(2GB)를 넘었습니다 (${err.message || err}).`
+        + ' 다른 탭을 닫고, 한 조각 최대 크기를 줄여 다시 해 보세요.'
       : (err.message || String(err));
   }
   renderList();

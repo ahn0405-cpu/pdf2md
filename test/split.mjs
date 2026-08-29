@@ -102,6 +102,35 @@ test('조각 안의 쪽 내용이 원본 그대로다', () => {
   assert.deepEqual(seen, Array.from({ length: 30 }, (_, i) => `PAGE-${i + 1}`));
 });
 
+test('쪽끼리 함께 쓰는 자원을 조각마다 한 번만 옮긴다', async () => {
+  // 쪽마다 graft map 을 새로 만들면 공유 자원이 쪽 수만큼 복제된다. 20MB를
+  // 함께 쓰는 20쪽이 40MB 가 아니라 420MB 로 불어나고, 큰 문서에서는 WASM 힙
+  // 상한(2GB)에 부딪혀 realloc 실패로 죽는다 — 실제로 그랬다.
+  const doc = new mupdf.PDFDocument();
+  const shared = doc.addRawStream(noise(2 * MB, 7),
+    { Type: 'XObject', Subtype: 'Form', BBox: [0, 0, 1, 1] });
+  for (let i = 0; i < 8; i++) {
+    const own = doc.addRawStream(noise(128 * 1024, i + 1),
+      { Type: 'XObject', Subtype: 'Form', BBox: [0, 0, 1, 1] });
+    doc.insertPage(-1, doc.addPage([0, 0, 300, 300], 0,
+      { XObject: { Shared: shared, Own: own } }, ''));
+  }
+  const buf = doc.saveToBuffer('');
+  const bytes = buf.asUint8Array().slice();
+  buf.destroy();
+  doc.destroy();
+
+  // 조각마다 공유분(2MB)은 한 번씩 들어간다. 그 위에 쪽마다 128KB 씩 얹히므로
+  // 3MB 한도에는 여러 쪽이 함께 들어가야 한다. 쪽마다 복제하면 한 쪽만으로
+  // 2.1MB 라 조각마다 한 쪽씩 밖에 못 담는다.
+  const r = await splitPdf(mupdf, bytes, { limitBytes: 3 * MB, name: 'shared.pdf' });
+  const total = r.parts.reduce((a, p) => a + p.size, 0);
+  assert.ok(r.parts[0].pages >= 4,
+    `첫 조각에 ${r.parts[0].pages}쪽밖에 못 담았다 (공유 자원이 쪽마다 복제된 듯하다)`);
+  assert.ok(total < bytes.length * 2,
+    `조각 합계가 ${formatSize(total)} 로 원본 ${formatSize(bytes.length)} 의 두 배를 넘었다`);
+});
+
 /* ---------------- 이름 ---------------- */
 
 test('조각 이름에 번호를 0으로 채워 붙인다', () => {
@@ -181,6 +210,7 @@ function countingMupdf() {
   class Counted extends mupdf.PDFDocument {
     constructor(...args) { super(...args); watch(this, 'document'); }
     saveToBuffer(...args) { return watch(super.saveToBuffer(...args), 'buffer'); }
+    newGraftMap(...args) { return watch(super.newGraftMap(...args), 'graftMap'); }
   }
   return {
     api: { ...mupdf, PDFDocument: Counted,
