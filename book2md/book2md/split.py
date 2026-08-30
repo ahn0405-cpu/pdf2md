@@ -35,7 +35,15 @@ class Part:
 def split(blocks: list[Block], prof: dict) -> list[Part]:
     mode = prof.get("split", "chapter")
     limit = int(prof.get("split_max_bytes", 0))
-    parts = _split_group(blocks) if mode == "group" else _split_chapter(blocks)
+    if mode == "group":
+        parts = _split_group(blocks)
+    elif any(b.kind == "heading" and b.level == 2 for b in blocks):
+        parts = _split_chapter(blocks)
+    else:
+        # 이 교재는 장 제목이 쪽마다 되풀이되는 꼬리말로만 찍혀 있어서
+        # 본문에는 없다. 그럴 때는 논점(절) 단위로 나눈다. 안 그러면 한 덩어리를
+        # 크기로만 쪼개어 '머리1', '머리2' 같은 이름이 붙는다.
+        parts = _split_level(blocks, 3)
     if limit:
         parts = _resplit(parts, limit)
     for k, part in enumerate(parts, 1):
@@ -72,6 +80,34 @@ def _split_chapter(blocks) -> list[Part]:
     return parts or [Part(index=1, title="전체", blocks=list(blocks))]
 
 
+def _split_level(blocks, level: int) -> list[Part]:
+    """주어진 수준의 헤딩마다 자른다. 파일 이름은 그 제목에서 딴다."""
+    parts, current, lead = [], None, []
+    for b in blocks:
+        if b.kind == "heading" and b.level <= level:
+            if current:
+                parts.append(current)
+            title = _plain(b.text)
+            current = Part(index=0, title=title, chapter=title)
+            current.blocks.extend(lead)
+            lead = []
+            current.blocks.append(b)
+            continue
+        if current is None:
+            lead.append(b)
+            continue
+        current.blocks.append(b)
+    if lead and not parts and not current:
+        current = Part(index=0, title="머리", blocks=lead)
+    elif lead and current is None:
+        current = Part(index=0, title="머리", blocks=lead)
+    elif lead:
+        parts.insert(0, Part(index=0, title="머리", blocks=lead))
+    if current:
+        parts.append(current)
+    return parts or [Part(index=1, title="전체", blocks=list(blocks))]
+
+
 def _split_group(blocks) -> list[Part]:
     """사례집: 문제 번호의 앞 글자(E, F…)가 바뀌면 새 파일."""
     parts, current, letter = [], None, None
@@ -103,13 +139,15 @@ def _resplit(parts, limit) -> list[Part]:
                 made.append(chunk)
                 chunk = None
             if chunk is None:
-                chunk = Part(index=0, title=part.title, chapter=part.chapter,
-                             section=_plain(b.text) if b.kind == "heading" else "")
+                head = _plain(b.text) if b.kind == "heading" else ""
+                chunk = Part(index=0, title=head or part.title,
+                             chapter=part.chapter, section=head)
             chunk.blocks.append(b)
         if chunk:
             made.append(chunk)
         for k, m in enumerate(made, 1):
-            m.title = f"{part.title}-{k}"
+            if not m.section:                    # 제목을 못 찾은 조각만 번호로
+                m.title = f"{part.title}-{k}"
         out.extend(made)
     return out
 

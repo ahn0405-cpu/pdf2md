@@ -55,6 +55,8 @@ class FootnoteCollector:
         self.tail_lines = int(fn.get("markdown_tail_lines", 12))
         self.inline_from_numbers = bool(fn.get("inline_ref_from_numbers", True))
         self.state = FootnoteState()
+        #: 최근 쪽들에서 확정된 각주 번호. 참조가 정의보다 한 쪽 앞서기도 한다.
+        self.recent: list[list[int]] = []
 
     # ── 페이지 처리 ──────────────────────────────────────────────
     def process(self, page: Page) -> list[Footnote]:
@@ -78,6 +80,8 @@ class FootnoteCollector:
         body = [l for l in page.lines if id(l) not in marked and l.zone != "header"]
 
         found = self._parse_zone(zone, page.number)
+        self.recent.append([f.number for f in found])
+        self.recent = self.recent[-3:]
         self._inline_refs(page, body, found)
         page.lines = body
         return found
@@ -184,7 +188,11 @@ class FootnoteCollector:
         """
         if not self.inline_from_numbers:
             return
-        numbers = sorted({f.number for f in found}, reverse=True)
+        # 이 쪽에서 정의된 번호가 우선이지만, 앞 두 쪽 것도 함께 본다.
+        # 각주가 쪽을 넘어 이어지면 참조가 정의보다 앞 쪽에 남는다.
+        pool = {n for chunk in self.recent for n in chunk}
+        pool |= {f.number for f in found}
+        numbers = sorted(pool, reverse=True)
         if not numbers:
             return
         for line in body:

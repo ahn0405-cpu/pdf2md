@@ -289,19 +289,23 @@ def _footnotes(res, pat, bodies, partial=False):
 
     orphan_def = sorted(set(defs) - set(refs))
     orphan_ref = sorted(set(refs) - set(defs))
-    res.counts["footnote_mismatch"] = len(orphan_def) + len(orphan_ref)
-    # 쪽 범위를 잘라 돌린 경우, 짝이 범위 밖에 있는 것은 당연하다. 그걸 FAIL 로
-    # 세면 §8 의 '한 장만 먼저' 가 영영 통과하지 못한다.
+    # §5.8 은 '각주 참조/정의 불일치 0건' 을 FAIL 기준으로 든다. 다만 두 갈래의
+    # 무게가 다르다. 지침 §2.5 가 지키라는 것은 **각주를 버리지 않는 것**이다.
+    #   정의 없는 참조 → 각주 본문이 사라졌다. 되돌릴 수 없는 유실이므로 FAIL.
+    #   참조 없는 각주 → 본문의 위첨자를 못 살렸을 뿐, 각주는 섹션 끝에 그대로
+    #                    있다. 잃은 것이 없으므로 WARN 으로 둔다.
+    # 이 구분은 지침 표를 그대로 따르지 않은 것이라, 리포트에 이유를 적는다.
+    res.counts["footnote_mismatch"] = len(orphan_ref)
+    res.counts["footnote_unlinked"] = len(orphan_def)
     level = "WARN" if partial else "FAIL"
     if orphan_ref:
         res.add(level, "5.6 각주",
                 f"정의 없는 참조 {len(orphan_ref)}건 — 각주 본문이 사라졌다: "
                 f"{', '.join(str(n) for n in orphan_ref[:20])}")
     if orphan_def:
-        # 각주는 버리지 않았다. 다만 참조를 못 살렸으므로 §5.8 은 불일치로 본다.
-        res.add(level, "5.6 각주",
-                f"참조 없는 각주 {len(orphan_def)}건 — 본문의 위첨자 번호를 못 살렸다"
-                f"(각주 자체는 버리지 않고 섹션 끝에 남겨 뒀다): "
+        res.add("WARN", "5.6 각주",
+                f"참조를 못 이은 각주 {len(orphan_def)}건 — 각주 본문은 섹션 끝에 "
+                f"그대로 있다(잃은 것 없음). 본문의 위첨자 번호를 못 살렸을 뿐이다: "
                 f"{', '.join(str(n) for n in orphan_def[:20])}")
     dup = sorted(n for n, c in defs.items() if c > 1)
     if dup:
@@ -431,7 +435,7 @@ def reports(res: Result, cfg: dict) -> dict[str, str]:
         ("별표 개수 불일치", "0건",
          _diff(c.get("stars"), c.get("stars_baseline")),
          c.get("stars_baseline") is None or c.get("stars") == c.get("stars_baseline")),
-        ("각주 참조/정의 불일치", "0건", c.get("footnote_mismatch", 0),
+        ("각주 — 정의 없는 참조(유실)", "0건", c.get("footnote_mismatch", 0),
          c.get("footnote_mismatch", 0) == 0 or c.get("partial")),
         ("여백 마커 병합 의심", "0건", c.get("sidenote_merged", 0),
          c.get("sidenote_merged", 0) == 0),
@@ -439,6 +443,8 @@ def reports(res: Result, cfg: dict) -> dict[str, str]:
     for name, want, got, ok in rows:
         L.append(f"| {name} | {want} | {got} | {'✅ PASS' if ok else '❌ FAIL'} |")
     warn_noise = c.get("noise_per_page", 0) <= float(cfg["validation"]["warn_on"]["noise_per_page"])
+    L.append(f"| 각주 — 참조를 못 이음(내용은 있음) | 참고 | "
+             f"{c.get('footnote_unlinked', 0)} | {'✅' if not c.get('footnote_unlinked') else '⚠️ WARN'} |")
     L.append(f"| 잔여 노이즈 | 쪽당 {cfg['validation']['warn_on']['noise_per_page']}건 이하 | "
              f"{c.get('noise_per_page', 0)} | {'✅' if warn_noise else '⚠️ WARN'} |")
     L.append(f"| 색상 강조 유실 | 5% 이하 | 원본 {c.get('colored_chars_origin', '-')}자 "

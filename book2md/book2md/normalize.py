@@ -57,6 +57,10 @@ class Normalizer:
         self.date_hangul = n.get("date_trailing_hangul", "warn")
         self.stars = "".join(cfg["preserve"]["star"]["chars"])
         self.allowed = _allowed_set(cfg.get("noise_scan", {}))
+        self.corrections = [
+            (c["find"], c.get("to", ""), c.get("note", ""))
+            for c in (cfg.get("corrections") or []) if c.get("find")
+        ]
 
     # ── 페이지 단위 ──────────────────────────────────────────────
     def normalize_page(self, page: Page) -> list[Change]:
@@ -77,6 +81,7 @@ class Normalizer:
         if self.fullwidth_parens:
             text = text.replace("（", "(").replace("）", ")")
 
+        text = self._corrections(text, page_no, changes)
         text = self._mnemonic_brackets(text, page_no, changes)
         text = self._noise(text, page_no, changes)
         text = self._cases(text, page_no, changes)
@@ -88,6 +93,23 @@ class Normalizer:
         if self.collapse:
             text = re.sub(r"[ \t ]+", " ", text).strip()
 
+        return text
+
+    # ── 사람이 확정한 정정 ───────────────────────────────────────
+    def _corrections(self, text: str, page_no: int, changes: list[Change]) -> str:
+        """config.yaml 의 corrections 만 적용한다. 스스로 고치지 않는다.
+
+        OCR 이 글자를 삼켜 버려 프로그램이 되살릴 수 없는 것들이 있다.
+        무엇으로 되돌릴지는 원문을 본 사람만 안다.
+        """
+        for find, to, note in self.corrections:
+            idx = text.find(find)
+            while idx >= 0:
+                changes.append(Change(page_no, "correction", find, to,
+                                      _ctx(text, idx, idx + len(find)) +
+                                      (f"  ({note})" if note else "")))
+                text = text[:idx] + to + text[idx + len(find):]
+                idx = text.find(find, idx + len(to))
         return text
 
     # ── 두문자 대괄호 복구 (§2.2) ─────────────────────────────────

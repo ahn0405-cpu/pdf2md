@@ -66,6 +66,7 @@ class Structurer:
         self._label_rx = re.compile(legend["case_label"]["pattern"])
         self._outline = legend["outline"]
         self._side_rx = re.compile(legend["sidenote"]["pattern"])
+        self._toc_rx = re.compile(cfg.get("toc", {}).get("line", r"(?!)"))
         self._side_tol = float(legend["sidenote"].get("match_tolerance", 12))
 
         self._heads = [(h["level"], re.compile(h["pattern"]))
@@ -98,6 +99,10 @@ class Structurer:
             # `==IV. 시효중단==` 을 그대로 맞추면 제목이 하나도 안 걸린다.
             plain = _strip_markup(text)
             self.seen_chars += _emphasised_chars(text)
+            if self._toc_rx.search(plain):
+                # 목차 줄. 제목으로 삼지 않고 본문으로 흘려보낸다.
+                self._paragraph(text, page.number)
+                continue
             if self._bonus is not None and self._bonus_continues(plain):
                 self._bonus.append(text)
                 continue
@@ -451,8 +456,14 @@ def _join_lines(lines: list[str], mode: str) -> str:
         if head.endswith("-") and tail[:1].isascii():
             out = head[:-1] + tail
             continue
+        # 사건번호가 줄에서 끊긴 경우. 두 갈래로 끊긴다.
+        #   '74다' / '1557'      부호까지 오고 일련번호가 넘어감
+        #   '91'   / '다43176'   연도만 오고 부호부터 넘어감
         if re.search(r"\d{2,4}[가-힣]{1,2}$", head) and tail[:1].isdigit():
-            out = head + tail          # 사건번호가 줄에서 끊긴 경우
+            out = head + tail
+            continue
+        if re.search(r"(?<![0-9])\d{2,4}$", head) and re.match(r"[가-힣]{1,2}\d", tail):
+            out = head + tail
             continue
         if mode == "none" and _CJK.search(head[-1:] or "") and _CJK.search(tail[:1] or ""):
             out = head + tail

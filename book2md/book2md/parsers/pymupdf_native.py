@@ -210,7 +210,11 @@ class PyMuPDFParser(Parser):
                     kept = []
                     for span in spans:
                         text = span["text"].strip()   # _restore_spaces 가 채워 둔다
-                        if span["bbox"][0] >= margin_x and (
+                        # 버릴 때는 자리를 가리지 않는다. 여백에서 벗어난 옆번호가
+                        # 본문에 섞이면 붙은 글자만큼 참조가 바뀐다(§4.3).
+                        # 남길 때는 여백에 있는 것만 — 본문 속 같은 꼴을 뺏지 않도록.
+                        at_margin = span["bbox"][0] >= margin_x
+                        if (at_margin or not self.keep_sidenotes) and (
                                 side_rx.match(text) or side_inline.fullmatch(text)):
                             if self.keep_sidenotes:
                                 sidenotes.append({"text": text,

@@ -23,7 +23,7 @@ from book2md.model import Line, Page                             # noqa: E402
 from book2md.normalize import Normalizer                         # noqa: E402
 from book2md.patterns import Patterns                            # noqa: E402
 from book2md.structure import Structurer, render                 # noqa: E402
-from book2md.split import split, front_matter                    # noqa: E402
+from book2md.split import split, front_matter, filename                    # noqa: E402
 from book2md.validate import validate                            # noqa: E402
 
 CFG = load_config(ROOT / "config.yaml")
@@ -213,8 +213,73 @@ class 구조화(unittest.TestCase):
         self.assertIn("(2019다223723)", render(blocks))
 
 
+class 정정(unittest.TestCase):
+    """§4.8 의 예외 — 사람이 확정한 정정만 적용한다."""
+
+    def test_적은_것만_바꾸고_기록을_남긴다(self):
+        import copy
+        cfg = copy.deepcopy(CFG)
+        cfg["corrections"] = [
+            {"find": "仏018다210539", "to": "(2018다210539", "note": "괄호+연도 유실"}]
+        norm = Normalizer(cfg, Patterns.build(cfg))
+        changes: list = []
+        out = norm.normalize_line("볼 수 없다仏018다210539).", 1, changes)
+        self.assertIn("(2018다210539)", out)
+        self.assertTrue(any(c.kind == "correction" for c in changes))
+
+    def test_목록이_비면_아무것도_바꾸지_않는다(self):
+        changes: list = []
+        out = Normalizer(CFG, PAT).normalize_line("볼 수 없다仏018다210539).", 1, changes)
+        self.assertIn("仏018다210539", out)      # 스스로 고치지 않는다
+
+
+class 오검출(unittest.TestCase):
+    """세는 대상이 틀리면 규칙이 맞아도 판정이 어긋난다."""
+
+    def test_굵게_표시를_별표로_세지_않는다(self):
+        # `**3. 判例 (74다1557)**` 의 ** 가 별표로 잡히면 개수 대조가 부풀어 오른다
+        self.assertEqual(PAT.case_star.findall("**판시 (74다1557)**"), [])
+        self.assertEqual(len(PAT.case_star.findall("(91다43695*) 와 2018다44114*")), 2)
+
+    def test_통화_표기를_사건번호로_보지_않는다(self):
+        # '1,000만 원' 이 '1,000므1 원' 으로 흘러나온다
+        self.assertEqual(PAT.find_cases("대여금 1,000므1 원과"), [])
+        self.assertEqual(PAT.find_cases("대여금이 7000므1 원이라고"), [])
+        self.assertEqual([m.group(0) for m in PAT.case.finditer("판시 (2019다223723)")],
+                         ["2019다223723"])
+
+    def test_목차_줄은_제목이_아니다(self):
+        prof = get_profile(CFG, "casebook")
+        st = Structurer(CFG, prof, PAT)
+        rows = ["D-1. [공유물분할의 쇠.....................188",
+                "D-2. [토지경계확정의 소]......................190",
+                "D-3. [실제 문제 제목]"]
+        st.feed(Page(number=1, kind="layout",
+                     lines=[Line(text=t, size=9.0, y0=100 + 16 * k, y1=110 + 16 * k)
+                            for k, t in enumerate(rows)]), [])
+        heads = [b for b in st.finish() if b.kind == "heading"]
+        self.assertEqual(len(heads), 1)
+        self.assertIn("D-3", heads[0].text)
+
+
 class 분할(unittest.TestCase):
     """§6.3"""
+
+    def test_장이_없으면_절_제목으로_파일을_나눈다(self):
+        """이 교재는 장 제목이 꼬리말로만 있어 본문에 없다. 그래도 '머리1',
+        '머리2' 가 아니라 논점 제목이 파일 이름이 되어야 한다."""
+        prof = get_profile(CFG, "textbook")
+        st = Structurer(CFG, prof, PAT)
+        rows = ["046 일부청구", "I. 의의", "본문이다.",
+                "047 소장의 필요적 기재사항", "I. 의의", "다른 본문이다."]
+        st.feed(Page(number=1, kind="layout",
+                     lines=[Line(text=t, size=9.0, y0=100 + 16 * k, y1=110 + 16 * k)
+                            for k, t in enumerate(rows)]), [])
+        parts = split(st.finish(), prof)
+        names = [filename(p, prof) for p in parts]
+        self.assertEqual(len(parts), 2)
+        self.assertIn("046일부청구", names[0])
+        self.assertNotIn("머리", " ".join(names))
 
     def test_장_단위로_나누고_프론트매터를_붙인다(self):
         prof = get_profile(CFG, "textbook")

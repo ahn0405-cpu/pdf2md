@@ -344,6 +344,8 @@ def scanned_textbook(path: Path):
     for y, x, shown, color, _ in rows:
         page.insert_text((x, y), shown, fontname="wqy", fontsize=9, color=color)
     page.insert_text((W - M - 24, 170), "sE-8", fontname="wqy", fontsize=7, color=B)
+    # 여백을 벗어나 본문 쪽에 찍힌 옆번호. 실물에서 sO-13 이 이랬다.
+    page.insert_text((M + 90, 196), "sE-9", fontname="wqy", fontsize=7, color=B)
     for y, text, size in foots:
         page.insert_text((M, y), text, fontname="wqy", fontsize=size, color=B)
     page.insert_text((M, footer[0]), footer[1], fontname="wqy",
@@ -358,6 +360,7 @@ def scanned_textbook(path: Path):
     for y, x, shown, _, ocr in rows:
         _place_ocr(out, x, y, shown, ocr, 9)
     out.insert_text((W - M - 24, 170), "sE-8", fontname="wqy", fontsize=7, render_mode=3)
+    out.insert_text((M + 90, 196), "sE-9", fontname="wqy", fontsize=7, render_mode=3)
     for y, text, size in foots:
         out.insert_text((M, y), text, fontname="wqy", fontsize=size, render_mode=3)
     out.insert_text((M, footer[0]), footer[1], fontname="wqy",
