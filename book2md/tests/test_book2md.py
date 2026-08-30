@@ -129,6 +129,19 @@ class 각주(unittest.TestCase):
         self.assertIn("제1심", body)
         self.assertNotIn("[^2]", body)
 
+    def test_목록_번호를_각주_참조로_바꾸지_않는다(self):
+        """'(1) 이송결정의 구속력' 이 '([^1] …' 이 되면 설문 번호가 통째로 망가진다."""
+        col = FootnoteCollector(CFG, PAT)
+        page = self._page(
+            1, ["(1) 이송결정의 구속력 [제38조 1항]", "(2) 특별재판적 [제18조]"],
+            ["1) 각주 본문이다. 충분히 길게 적어 각주로 보이게 한다.",
+             "2) 또 다른 각주 본문이다. 충분히 길게 적는다."])
+        col.process(page)
+        body = "\n".join(l.text for l in page.lines)
+        self.assertIn("(1) 이송결정의 구속력", body)
+        self.assertIn("(2) 특별재판적", body)
+        self.assertNotIn("[^", body)
+
     def test_괄호가_붙은_번호는_각주_참조로_본다(self):
         col = FootnoteCollector(CFG, PAT)
         page = self._page(
@@ -332,12 +345,15 @@ class 검증(unittest.TestCase):
     def _write(self, body, fm='---\nsource: 기본서\nparser: pymupdf\ncases:\n'):
         (self.dir / "a.md").write_text(fm + "---\n\n" + body, encoding="utf-8")
 
-    def test_원본_별표는_공백이_껴도_센다(self):
-        """원본에는 '91 다43176*' 처럼 공백이 낀다. 엄격 패턴으로 원본을 세면
-        변환본이 늘어난 것처럼 보여 엉뚱한 FAIL 이 난다."""
+    def test_원본_별표는_한_줄_안의_공백까지만_센다(self):
+        """원본에는 '91 다43176*' 처럼 공백이 낀다. 엄격 패턴으로 세면 변환본이
+        늘어난 것처럼 보이고, 줄바꿈까지 허용하면 반대로 모자란 것처럼 보인다.
+        정규화가 실제로 붙일 수 있는 범위(한 줄)와 자를 맞춘다."""
         raw = "판시 (91 다43176*) 와 (74다1557*) 이다."
         self.assertEqual(len(PAT.case_star_loose.findall(raw)), 2)
         self.assertEqual(len(PAT.case_star.findall(raw)), 1)
+        # 줄을 넘어 끊긴 것은 세지 않는다 — 정규화가 못 붙인다
+        self.assertEqual(PAT.case_star_loose.findall("판시 (91\n다43176*)"), [])
 
     def test_별표_개수_불일치는_FAIL(self):
         self._write("판시 (91다43695*) 이다.\n")

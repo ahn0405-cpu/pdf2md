@@ -103,7 +103,8 @@ def validate(root, cfg: dict, baseline: dict | None = None) -> Result:
 
     _cases(res, pat, body_by_file)
     _stars(res, pat, whole, baseline)
-    _mnemonics(res, pat, body_by_file)
+    _mnemonics(res, pat, body_by_file,
+               bool(cfg["preserve"]["mnemonic"].get("warn_bare", False)))
     _color(res, whole, baseline, cfg)
     _sidenotes(res, cfg, body_by_file)
     _footnotes(res, pat, body_by_file, bool((baseline or {}).get("partial")))
@@ -158,7 +159,7 @@ def _stars(res, pat, whole, baseline):
 
 
 # ── 5.3 두문자 (교차검증은 crosscheck 에서) ──────────────────────
-def _mnemonics(res, pat, bodies):
+def _mnemonics(res, pat, bodies, warn_bare=False):
     for path, text in bodies.items():
         for m in pat.mnemonic.finditer(text):
             body = m.group("body")
@@ -168,16 +169,19 @@ def _mnemonics(res, pat, bodies):
             res.mnemonic_context.setdefault(body, []).append(
                 f"{path.name}: {_ctx(text, m.start(), m.end())}")
     res.counts["mnemonics"] = len(res.mnemonics)
-    _bare_mnemonics(res, pat, bodies)
+    _bare_mnemonics(res, pat, bodies, warn_bare)
 
 
-def _bare_mnemonics(res, pat, bodies):
+def _bare_mnemonics(res, pat, bodies, cfg_warn_bare=False):
     """대괄호를 잃은 두문자 후보 (§2.2).
 
     OCR 이 대괄호를 통째로 흘리면 `확객시젠[종확나시]` 처럼 앞말이 맨몸으로
     남는다. 괄호를 우리가 지어내면 안 되므로(§4.8), 자리만 짚어 사람에게 넘긴다.
     """
-    rx = re.compile(r"(?<![\[`가-힣])([가-힣]{3,6})\s*`?\[(?!\^)")
+    if not cfg_warn_bare:
+        return
+    # 각주 참조 [^n] 과 조문 인용 [제265조] 는 두문자가 아니다.
+    rx = re.compile(r"(?<![\[`가-힣])([가-힣]{3,6})\s*`?\[(?!\^|제\s*\d)")
     hits = 0
     for path, text in bodies.items():
         for m in rx.finditer(text):
