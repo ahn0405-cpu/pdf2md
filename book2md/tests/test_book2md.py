@@ -1582,5 +1582,144 @@ parser: pymupdf
         self.assertIn("⚠️ 근거", out)
 
 
+class 절제목_전수점검(unittest.TestCase):
+    """`convert audit-sections` — 고치기 전에 몇 건인지부터 센다.
+
+    가짜 절 하나가 판례를 엉뚱한 목차 아래로 끌고 간다. 002 신의칙에서
+    `(D 의의` 가 진짜 `II. 내용` 절의 판례 12건을 가져갔다.
+    """
+
+    신의칙 = """---
+source: 기본서
+chapter: "002 신의칙"
+outline: ["의의", "내용", "예외", "효과", "관련논점"]
+parser: pymupdf
+---
+
+### 002 신의칙
+
+==& 의의 - 내용 - 예외 - 효과 - 관련논점==
+
+#### I. 의의 및 취지
+
+신의성실의 원칙이란 …
+
+#### II. 내용
+
+가) 모순거동금지 …
+
+#### (D 의의
+
+실효의 원칙이란 … (2011다84298)
+
+#### III. 예외
+
+#### IV. 효과
+
+#### V. 관련논점
+"""
+
+    대위소 = """---
+source: 기본서
+chapter: "034 피보전채권 이행의 소 확정판결과 대위소"
+outline: ["의의", "내용", "고유필수적 공동소송인 추가", "효과"]
+parser: pymupdf
+---
+
+### 034 대위소
+
+==& 의의 - 내용 - 고유필수적 공동소송인 추가 - 효과==
+
+#### I. 의의
+
+#### II. 내용
+
+#### III. 고유필수적 공동소승인 추개■ ：＞(%찌--------------------------- ---
+
+#### VIII • 윤곽 민사소송법
+"""
+
+    @classmethod
+    def setUpClass(cls):
+        from book2md import audit
+        cls.audit = audit
+        cls.tmp = Path(tempfile.mkdtemp())
+        (cls.tmp / "기본서").mkdir()
+        (cls.tmp / "기본서" / "02_002신의칙.md").write_text(cls.신의칙, encoding="utf-8")
+        (cls.tmp / "기본서" / "34_034대위소.md").write_text(cls.대위소, encoding="utf-8")
+        # 러닝 헤더는 논점마다 되풀이된다 — 그것이 머리말의 표지다
+        for n in (35, 36):
+            (cls.tmp / "기본서" / f"{n}_0{n}다른논점.md").write_text(
+                cls.대위소.replace("034 피보전채권 이행의 소 확정판결과 대위소",
+                                 f"0{n} 다른 논점"), encoding="utf-8")
+        cls.data = audit.scan(cls.tmp, CFG)
+        cls.kinds = audit.classify(cls.data, repeat_min=3)
+
+    @classmethod
+    def tearDownClass(cls):
+        shutil.rmtree(cls.tmp, ignore_errors=True)
+
+    def _titles(self, kind):
+        return [s.title for s in self.kinds[kind]]
+
+    def test_목차_항목을_두_번_쓴_절을_잡는다(self):
+        """'I. 의의 및 취지' 가 이미 '의의' 를 썼다. '(D 의의' 는 그 다음이다."""
+        self.assertEqual(self._titles("목차_두_번_씀"), ["(D 의의"])
+
+    def test_먼저_선_절은_가짜로_보지_않는다(self):
+        self.assertNotIn("I. 의의 및 취지", self._titles("목차_두_번_씀"))
+        self.assertNotIn("II. 내용", self._titles("목차_두_번_씀"))
+
+    def test_되풀이되는_머리말이_절로_선_것을_잡는다(self):
+        self.assertEqual(set(self._titles("머리말로_보임")), {"VIII • 윤곽 민사소송법"})
+
+    def test_논점마다_나오는_진짜_절은_머리말로_보지_않는다(self):
+        """'I. 의의' 도 논점마다 나온다. 반복만 세면 이것이 걸린다."""
+        모두 = sum(self.kinds.values(), []) if False else self._titles("머리말로_보임")
+        self.assertNotIn("I. 의의", 모두)
+        self.assertNotIn("II. 내용", 모두)
+
+    def test_깨진_절_제목에_목차_띠의_이름을_붙여_보여준다(self):
+        """제목 글자는 손대지 않는다. 사람이 고칠 정보만 옆에 둔다 (§4.8)."""
+        깨진 = [s for s in self.kinds["잡글자_섞임"] if "고유필수적" in s.title]
+        self.assertTrue(깨진)
+        s = 깨진[0]
+        self.assertIn("■", s.junk)
+        band = self.data["bands"][s.file][s.band]
+        self.assertEqual(self.audit._near(band, s.key), "고유필수적 공동소송인 추가")
+
+    def test_목차에_있는데_절이_안_선_것도_센다(self):
+        left = {x for _, _, items in self.kinds["목차에_있는데_절이_없음"] for x in items}
+        self.assertIn("고유필수적 공동소송인 추가", left)
+
+    def test_깨끗한_논점은_아무것도_안_잡힌다(self):
+        clean = Path(tempfile.mkdtemp())
+        (clean / "기본서").mkdir()
+        (clean / "기본서" / "45_046일부청구.md").write_text("""---
+source: 기본서
+chapter: "046 일부청구"
+outline: ["의의", "소송물", "중복소제기"]
+parser: pymupdf
+---
+
+### 046 일부청구
+
+==& 의의 - 소송물 - 중복소제기==
+
+#### I. 의의
+
+#### II. 소송물
+
+#### III. 중복소제기
+""", encoding="utf-8")
+        try:
+            k = self.audit.classify(self.audit.scan(clean, CFG))
+            self.assertEqual({name: len(v) for name, v in k.items()},
+                             {"목차_두_번_씀": 0, "머리말로_보임": 0, "잡글자_섞임": 0,
+                              "목차에_없음": 0, "목차에_있는데_절이_없음": 0})
+        finally:
+            shutil.rmtree(clean, ignore_errors=True)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

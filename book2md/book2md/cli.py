@@ -20,6 +20,7 @@ from pathlib import Path
 from . import diagnose as diag_mod
 from .config import load_config, profile as get_profile
 from .crosscheck import crosscheck, read_decisions, merge_corrections
+from . import audit as audit_mod
 from . import mapping as map_mod
 from .parsers import availability, get_parser, pick_parser
 from .pipeline import Pipeline, STAGES
@@ -121,11 +122,44 @@ def main(argv=None) -> int:
     mv = msub.add_parser("validate", help="M1~M4 검증")
     mv.add_argument("path", nargs="?", default="mapping.yaml")
 
+    au = sub.add_parser("audit-sections",
+                        help="절 제목 전수 점검. 변환물만 읽는다 (재변환 없음)")
+    au.add_argument("dir", help="변환 결과 폴더 (출력 루트도 된다)")
+    au.add_argument("--out", help="리포트 파일 (기본: 화면)")
+    au.add_argument("--repeat-min", type=int, default=3,
+                    help="이만큼 되풀이되면 머리말로 본다 (기본 3)")
+    au.add_argument("--book-words", default="",
+                    help="책 제목 등 머리말에 들어가는 말. 쉼표로 구분")
+    au.add_argument("--limit", type=int, default=200, help="유형마다 보여줄 건수")
+
     sub.add_parser("parsers", help="쓸 수 있는 파서 보기")
 
     args = ap.parse_args(argv)
     cfg = load_config(args.config)
     return globals()[f"_cmd_{args.cmd.replace('-', '_')}"](args, cfg)
+
+
+# ── audit-sections ──────────────────────────────────────────────
+def _cmd_audit_sections(args, cfg) -> int:
+    root = Path(args.dir)
+    if not root.is_dir():
+        print(f"폴더가 없다: {root}", file=sys.stderr)
+        return 2
+    data = audit_mod.scan(root, cfg)
+    if not data["files"]:
+        print("기본서 md 를 못 찾았다. 프론트매터 `source:` 로 가른다.",
+              file=sys.stderr)
+        return 2
+    words = [w.strip() for w in args.book_words.split(",") if w.strip()]
+    kinds = audit_mod.classify(data, repeat_min=args.repeat_min, book_words=words)
+    text = audit_mod.report(data, kinds, limit=args.limit)
+    if args.out:
+        Path(args.out).write_text(text, encoding="utf-8")
+        print(f"→ {args.out}")
+    print(f"기본서 md {len(data['files'])}개 · 절 제목 {len(data['sections'])}개")
+    for k, v in kinds.items():
+        print(f"  {k.replace('_', ' ')}: {len(v)}건")
+    return 0
 
 
 # ── mapping (mapping_생성지침.md) ────────────────────────────────
