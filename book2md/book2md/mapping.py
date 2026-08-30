@@ -349,8 +349,12 @@ def _ans_hit(section: Section, prob: Problem, cfg: dict) -> list[str]:
     사례집이 판시를 요지로만 압축해 실어 사건번호·두문자가 희박한 실물에서,
     이것이 가장 판정력이 높은 근거다.
 
-    다만 '의의' '내용' '요건' '효과' 같은 짧은 절 이름은 어느 장에나 있어서
-    다 걸린다. 길이와 뼈대 말로 막는다.
+    다만 **장이 맞은 안에서만** 본다. 답안 목차는 한 문제에 수십 개씩 있고
+    '기판력' '소송물' 같은 논점 이름은 여러 장의 절 제목에 나타난다. 장을 안
+    걸면 절 500개 × 문제 304개가 이름만 겹쳐 다 이어진다 (실측 12,177쌍).
+
+    '의의' '내용' '요건' '효과' 같은 짧은 절 이름도 어느 장에나 있어서 다
+    걸린다. 길이와 뼈대 말로 막는다.
     """
     mp = cfg.get("mapping") or {}
     if not mp.get("answer_outline", True):
@@ -481,7 +485,7 @@ def build(roots, cfg: dict) -> dict:
             kw = _kw_hit(sec, prob)
             cs = sorted(sec.cases & prob.cases)
             mn, near = _mn_hit(sec, prob)
-            ans = _ans_hit(sec, prob, cfg)
+            ans = _ans_hit(sec, prob, cfg) if ck else []
             if not (kw or cs or mn or near or ans):
                 continue
             role, pts = _role(sec, prob)
@@ -869,8 +873,9 @@ def debug_report(data: dict, sample: int = 40) -> str:
 
     # 표본
     with_pt = sum(1 for p in problems if p.points is not None)
-    ans_pt = sum(1 for p in problems for a in p.answers if a.points is not None)
-    ans_all = sum(len(p.answers) for p in problems)
+    ans_pt = sum(1 for p in problems for a in p.answers
+                 if a.level == 3 and a.points is not None)
+    ans_all = sum(1 for p in problems for a in p.answers if a.level == 3)
     L += ["## 배점을 읽었나", "",
           f"- 총점을 읽은 문제 {with_pt}/{len(problems)}개",
           f"- 배점을 읽은 답안 항목 {ans_pt}/{ans_all}개",
