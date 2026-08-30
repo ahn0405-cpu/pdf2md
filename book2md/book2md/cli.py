@@ -74,6 +74,13 @@ def main(argv=None) -> int:
     c.add_argument("dir_b")
     c.add_argument("--labels", default="기본서,사례집")
 
+    al = sub.add_parser("all", help="폴더 안 PDF 를 진단→변환→검증→교차검증까지 한 번에")
+    al.add_argument("pdf_dir", help="PDF 가 든 폴더 (또는 PDF 파일 하나)")
+    al.add_argument("--out", default="output", help="출력 루트 (기본 output)")
+    al.add_argument("--pages", help="시험 삼아 이 범위만. 예: 168-178")
+    al.add_argument("--parser", help="파서 이름 (기본: 진단 결과로 고름)")
+    al.add_argument("--profile", help="모든 파일에 이 프로파일을 쓴다 (기본: 파일마다 추정)")
+
     pr = sub.add_parser("probe", help="원문 증거 뜨기. 진단이 '없다'고 할 때 확인용.")
     pr.add_argument("pdf")
     pr.add_argument("--find", help="이 글자가 몇 쪽에 있는지 (변환할 장 고를 때)")
@@ -282,6 +289,92 @@ def _cmd_crosscheck(args, cfg) -> int:
         print(f"\n두문자 불일치 의심 {mismatches}건. 사람이 판단할 것 (§2.2). "
               f"자동 교정하지 않았다.", file=sys.stderr)
         return 1
+    return 0
+
+
+# ── all ─────────────────────────────────────────────────────────
+def _cmd_all(args, cfg) -> int:
+    """§8 의 순서를 한 번에 돌린다. 판정은 파일마다 따로 낸다.
+
+    FAIL 이 나도 나머지 파일을 계속 돌린다. 리포트를 다 모아 놓아야 어디가
+    어긋났는지 한눈에 견줄 수 있기 때문이다. 대신 마지막 요약에서 FAIL 을
+    분명히 세우고, 하나라도 있으면 종료 코드 1 을 낸다 (§5.8).
+    """
+    target = Path(args.pdf_dir)
+    if not target.exists():
+        print(f"경로가 없다: {target}", file=sys.stderr)
+        return 2
+    pdfs = sorted(target.glob("*.pdf")) if target.is_dir() else [target]
+    if not pdfs:
+        print(f"폴더에 PDF 가 없다: {target}", file=sys.stderr)
+        return 2
+
+    root = Path(args.out)
+    reports = root / "_reports"
+    pages = _page_range(args.pages)
+    results, dirs = [], {}
+
+    for k, pdf in enumerate(pdfs, 1):
+        print(f"\n=== [{k}/{len(pdfs)}] {pdf.name} " + "=" * 20)
+        try:
+            d = diag_mod.run(str(pdf), cfg)
+        except Exception as exc:
+            print(f"  ! 진단 실패: {exc}", file=sys.stderr)
+            results.append((pdf.name, "-", "진단실패"))
+            continue
+        d["profile_hint"] = _guess_profile(d, cfg)
+        diag_mod.save(d, cfg, reports)
+        name = args.profile or d["profile_hint"]
+        print(f"[진단] {d['pages']:,}쪽 · "
+              f"{'텍스트' if d['text_layer'] else '스캔'} · {d['columns']}단 · "
+              f"색 {'그림' if d['color'].get('source') == 'image' else '글자'} · "
+              f"프로파일 {name}")
+
+        prof = get_profile(cfg, name)
+        parser_name = args.parser or pick_parser(cfg, d).name
+        out = root / pdf.stem
+        pipe = Pipeline(pdf, cfg, prof, out, reports, root / "_work" / pdf.stem,
+                        parser_name, pages)
+        try:
+            verdict = pipe.run("extract")
+        except Exception as exc:
+            print(f"  ! 변환 실패: {exc}", file=sys.stderr)
+            results.append((pdf.name, name, "변환실패"))
+            continue
+        results.append((pdf.name, name, verdict))
+        dirs.setdefault(name, []).append(out)
+        # 리포트가 파일마다 덮이지 않게 이름을 붙여 사본을 남긴다
+        for fname in ("validation.md", "warnings.md", "caselist.txt",
+                      "mnemonics.txt", "palette.md"):
+            src = reports / fname
+            if src.exists():
+                stem, ext = fname.rsplit(".", 1)
+                (reports / f"{stem}-{pdf.stem}.{ext}").write_text(
+                    src.read_text(encoding="utf-8"), encoding="utf-8")
+
+    # §5.3 교차 검증: 기본서 ↔ 사례집
+    books = dirs.get("textbook", [])
+    cases = dirs.get("casebook", [])
+    for a in books:
+        for b in cases:
+            text, mismatch = crosscheck(a, b, cfg, a.name, b.name)
+            path = reports / f"crosscheck-{a.name}-{b.name}.md"
+            path.write_text(text, encoding="utf-8")
+            print(f"\n[교차검증] {a.name} ↔ {b.name}: 두문자 불일치 의심 "
+                  f"{mismatch}건 → {path.name}")
+
+    print("\n" + "=" * 52)
+    print(f"{'파일':<34}{'프로파일':<12}판정")
+    for name, prof_name, verdict in results:
+        print(f"{name[:32]:<34}{prof_name:<12}{verdict}")
+    print(f"\n리포트: {reports}")
+    failed = [r for r in results if r[2] not in ("PASS", "WARN")]
+    if failed:
+        print(f"\nFAIL 이 {len(failed)}건 있다. warnings-<파일>.md 를 보고 "
+              f"config.yaml 을 고친 뒤 다시 돌릴 것 (§5.8).", file=sys.stderr)
+        return 1
+    print("\n사람이 눈으로 확인할 것: caselist-*.txt, mnemonics-*.txt, "
+          "crosscheck-*.md (§5.1, §5.3)")
     return 0
 
 

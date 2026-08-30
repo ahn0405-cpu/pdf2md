@@ -20,6 +20,9 @@ pip install -r requirements.txt          # PyYAML + PyMuPDF
 ## 쓰는 법 (§7)
 
 ```bash
+# 한 번에 (진단 → 변환 → 검증 → 교차검증). 파일마다 프로파일을 알아서 고른다.
+./convert all "PDF가 든 폴더" --out output
+
 # 0) 무엇을 쓸 수 있나
 ./convert parsers
 
@@ -51,6 +54,15 @@ pip install -r requirements.txt          # PyYAML + PyMuPDF
 `convert.cmd` 가 같은 일을 한다. `requirements.txt` 와 `convert.cmd` 는
 **이 프로그램 폴더**에 있다. PDF 폴더가 아니라 프로그램 폴더에서 실행하고,
 PDF 는 경로로 넘긴다.
+
+전체를 한 번에 돌리려면:
+
+```bat
+convert all "%USERPROFILE%\Documents\9. 민소법\25년 윤곽" --out "%USERPROFILE%\Documents\민소출력"
+```
+
+리포트는 파일마다 이름을 붙여 남는다(`validation-<파일>.md`, `caselist-<파일>.txt` …).
+FAIL 이 하나라도 있으면 종료 코드 1 이다.
 
 ```bat
 REM 1) 프로그램 내려받기 (git 이 있을 때)

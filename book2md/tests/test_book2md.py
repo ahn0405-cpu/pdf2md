@@ -422,6 +422,46 @@ class 되풀이꼬리말(unittest.TestCase):
         self.assertIn("### 044 논점 5", md)
 
 
+class 한번에(unittest.TestCase):
+    """convert all — 폴더 안 PDF 를 진단→변환→검증→교차검증까지 (§8)."""
+
+    @classmethod
+    def setUpClass(cls):
+        try:
+            import pymupdf  # noqa: F401
+        except Exception:
+            raise unittest.SkipTest("PyMuPDF 없음")
+        sys.path.insert(0, str(ROOT / "tests"))
+        import make_fixtures
+        if not Path(make_fixtures.FONT).exists():
+            raise unittest.SkipTest("한글 글꼴 없음")
+        cls.tmp = Path(tempfile.mkdtemp())
+        cls.src = cls.tmp / "src"
+        cls.src.mkdir()
+        make_fixtures.scanned_book(cls.src / "기본서.pdf", pages=4)
+
+    @classmethod
+    def tearDownClass(cls):
+        shutil.rmtree(getattr(cls, "tmp", "/nonexistent"), ignore_errors=True)
+
+    def test_폴더째_돌리고_파일별_리포트를_남긴다(self):
+        from book2md.cli import main
+        out = self.tmp / "out"
+        code = main(["--config", str(ROOT / "config.yaml"), "all",
+                     str(self.src), "--out", str(out)])
+        self.assertIn(code, (0, 1))          # FAIL 이면 1, 아니면 0
+        reports = out / "_reports"
+        # 파일마다 이름 붙인 사본이 남아야 여러 소스를 견줄 수 있다
+        for name in ("validation-기본서.md", "warnings-기본서.md",
+                     "caselist-기본서.txt", "mnemonics-기본서.txt",
+                     "diagnosis-기본서.md"):
+            self.assertTrue((reports / name).exists(), name)
+        md = "\n".join(p.read_text(encoding="utf-8")
+                        for p in (out / "기본서").glob("*.md"))
+        self.assertIn("### 040 논점 1", md)
+        self.assertNotIn("윤곽 민사소송법", md)      # 꼬리말은 빠진다
+
+
 class 스캔본(unittest.TestCase):
     """실물 교재의 꼴: 종이 그림 + OCR 텍스트 레이어.
 
