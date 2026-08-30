@@ -80,6 +80,9 @@ def main(argv=None) -> int:
     pr.add_argument("--page", type=int, help="이 쪽의 span·도형을 전부 덤프")
     pr.add_argument("--sample", type=int, default=40, help="훑을 쪽 수 (기본 40)")
     pr.add_argument("--pages", help="훑을 쪽을 직접 지정. 예: 120-160")
+    pr.add_argument("--lines", action="store_true",
+                    help="줄마다 무엇으로 읽혔는지 (헤딩이 안 잡힐 때)")
+    pr.add_argument("--profile", default="textbook", help="--lines 에 쓸 프로파일")
     pr.add_argument("--out", help="결과를 이 파일로 저장 (기본: 화면)")
 
     sub.add_parser("parsers", help="쓸 수 있는 파서 보기")
@@ -289,7 +292,11 @@ def _cmd_probe(args, cfg) -> int:
     if not pdf.exists():
         print(f"파일이 없다: {pdf}", file=sys.stderr)
         return 2
-    if args.find:
+    if args.lines:
+        rng = _page_range(args.pages)
+        text = probe_mod.lines(str(pdf), cfg, get_profile(cfg, args.profile),
+                               list(rng) if rng else None)
+    elif args.find:
         text = probe_mod.find(str(pdf), args.find)
     elif args.page:
         text = probe_mod.page(str(pdf), args.page)

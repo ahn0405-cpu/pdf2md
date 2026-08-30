@@ -255,3 +255,73 @@ def page(pdf_path: str, number: int) -> str:
                  f"| {r.x0:.0f},{r.y0:.0f} | {r.width:.0f}×{r.height:.0f} |" if r else "")
     doc.close()
     return "\n".join(L) + "\n"
+
+
+def lines(pdf_path: str, cfg: dict, prof: dict, pages) -> str:
+    """줄마다 '무엇으로 읽혔는지'를 보여 준다.
+
+    헤딩이 안 잡힐 때 규칙을 고치려면, 어느 줄이 어떤 규칙에 걸렸고 어느 줄이
+    아무 데도 안 걸렸는지를 봐야 한다. 추측으로 정규식을 고치면 다른 데가 깨진다.
+    """
+    import pymupdf
+
+    from .footnotes import FootnoteCollector
+    from .model import Page
+    from .normalize import Normalizer
+    from .parsers import get_parser
+
+    pat = Patterns.build(cfg)
+    prof = dict(prof)
+    prof["_config"] = cfg
+    parser = get_parser("pymupdf")
+    norm = Normalizer(cfg, pat)
+    collector = FootnoteCollector(cfg, pat)
+
+    heads = [(h["level"], re.compile(h["pattern"])) for h in prof.get("headings", [])]
+    sec_rx = re.compile(prof["section_item"]) if prof.get("section_item") else None
+    sec_max = int(prof.get("section_max_len", 40))
+    ans_heads = [(h["level"], re.compile(h["pattern"]))
+                 for h in prof.get("answer_headings", [])]
+    problem_rx = re.compile(prof["problem"]) if prof.get("problem") else None
+
+    L = [f"# 줄 판정 — `{pdf_path}`", "",
+         "`역할` 이 `본문` 인데 제목이어야 할 줄이 있으면 그 줄의 정규식을 고쳐야 한다.",
+         "각주 영역으로 떨어진 줄은 본문에서 빠진 것이다.", "",
+         "| 쪽 | y | x | pt | 영역 | 역할 | 줄 |",
+         "|---:|---:|---:|---:|---|---|---|"]
+    in_roman = False
+    for page in parser.parse(pdf_path, pages, prof):
+        zones = {id(l): l.zone for l in page.lines}
+        norm.normalize_page(page)
+        body_before = list(page.lines)
+        found = collector.process(page)
+        kept = {id(l) for l in page.lines}
+        for line in body_before:
+            text = line.stripped
+            if not text:
+                continue
+            zone = "각주" if id(line) not in kept else \
+                {"header": "머리말", "sidenote": "여백"}.get(zones.get(id(line), "body"), "본문")
+            role = "본문"
+            if zone == "본문":
+                for level, rx in heads:
+                    if rx.match(text):
+                        role = f"**헤딩 H{level}**"
+                        in_roman = (level == 4)
+                        break
+                else:
+                    if problem_rx and problem_rx.match(text):
+                        role = "**문제 헤딩**"
+                    elif any(rx.match(text) for _, rx in ans_heads) and len(text) <= 60:
+                        role = "**답안 헤딩**"
+                    elif sec_rx and sec_rx.match(text):
+                        short = len(text) <= sec_max
+                        role = ("굵은 소항목" if in_roman and short else
+                                "절 헤딩 H3" if short else "본문(N. 이지만 길다)")
+            shown = text[:60].replace("|", "\\|")
+            L.append(f"| {page.number} | {line.y0:.0f} | {line.x0:.0f} | {line.size:.1f} "
+                     f"| {zone} | {role} | {shown} |")
+        for f in found:
+            L.append(f"| {page.number} |  |  |  | 각주 | 정의 | "
+                     f"[^{f.number}] {f.text[:44]} |")
+    return "\n".join(L) + "\n"
