@@ -25,6 +25,7 @@ pip install -r requirements.txt          # PyYAML + PyMuPDF
 
 # 1) 진단부터. 이걸 건너뛰면 run 이 막힌다.
 ./convert diagnose 기본서.pdf --out output
+./convert diagnose "PDF가 든 폴더" --out output              # 폴더째 진단 + 요약표
 ./convert diagnose 기본서.pdf --out output --pages 120-122   # 조판을 볼 쪽 지정
 
 # 2) 한 장(章)만 변환해서 파이프라인을 확인한다
@@ -39,12 +40,39 @@ pip install -r requirements.txt          # PyYAML + PyMuPDF
 ./convert crosscheck output/기본서 output/사례집
 ```
 
-Windows 에서는 `convert.cmd` 가 같은 일을 한다.
+### Windows
+
+`convert.cmd` 가 같은 일을 한다. `requirements.txt` 와 `convert.cmd` 는
+**이 프로그램 폴더**에 있다. PDF 폴더가 아니라 프로그램 폴더에서 실행하고,
+PDF 는 경로로 넘긴다.
 
 ```bat
-cd /d C:\path\to\book2md
+REM 1) 프로그램 내려받기 (git 이 있을 때)
+cd /d %USERPROFILE%\Documents
+git clone -b claude/pdf-to-markdown-converter-lvkvkr https://github.com/ahn0405-cpu/pdf2md.git
+
+REM 2) 설치
+cd /d %USERPROFILE%\Documents\pdf2md\book2md
 python -m pip install -r requirements.txt
-convert diagnose "C:\Users\...\25년 윤곽\기본서.pdf" --out "%USERPROFILE%\Documents\민소출력"
+
+REM 3) 진단 — 폴더째 넘기면 안의 PDF 를 모두 본다
+convert diagnose "%USERPROFILE%\Documents\9. 민소법\25년 윤곽" --out "%USERPROFILE%\Documents\민소출력"
+```
+
+git 이 없으면 아래 ZIP 을 받아 `Documents` 아래에 풀고 2)부터 하면 된다.
+
+```
+https://github.com/ahn0405-cpu/pdf2md/archive/refs/heads/claude/pdf-to-markdown-converter-lvkvkr.zip
+```
+
+교재가 여러 권으로 나뉘어 있으면 **출력 폴더를 나눈다.** 사례집 상·하를 같은
+폴더에 쏟으면 문제 그룹 파일 이름(`E_*.md`)이 겹친다.
+
+```bat
+convert run "...\윤곽 민소법 기본서_압축.pdf"  --profile textbook --out output\기본서
+convert run "...\윤곽 민소 사례집 상.pdf"      --profile casebook --out output\사례집상
+convert run "...\윤곽 민소 사례집 하.pdf"      --profile casebook --out output\사례집하
+convert crosscheck output\기본서 output\사례집상
 ```
 
 `--from` 으로 중간 단계부터 다시 돌릴 수 있다.
