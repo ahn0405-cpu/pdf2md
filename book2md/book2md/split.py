@@ -184,16 +184,41 @@ def front_matter(part: Part, prof: dict, parser: str, validation: str) -> str:
     return "\n".join(L) + "\n\n"
 
 
-def write(parts, out_dir, prof, parser, validation="PENDING") -> list[str]:
+def write(parts, out_dir, prof, parser, validation="PENDING",
+          clean: bool = True) -> tuple[list[str], list[str]]:
+    """분할 결과를 쓴다. (쓴 파일, 지운 옛 파일)
+
+    쓰기 전에 이 폴더의 지난 결과물을 지운다. 실행마다 분할이 달라지면 옛
+    파일이 남아 검증이 같은 내용을 두 번 센다. 별표가 4에서 8이 되고 각주
+    정의가 통째로 중복돼 FAIL 이 난다.
+    """
     out = Path(out_dir)
     out.mkdir(parents=True, exist_ok=True)
+    removed = []
+    if clean:
+        keep = {filename(p, prof) for p in parts}
+        for old in sorted(out.glob("*.md")):
+            if old.name in keep:
+                continue
+            if _ours(old):
+                old.unlink()
+                removed.append(old.name)
     written = []
     for part in parts:
         path = out / filename(part, prof)
         path.write_text(front_matter(part, prof, parser, validation) + part.text(),
                         encoding="utf-8")
         written.append(str(path))
-    return written
+    return written, removed
+
+
+def _ours(path: Path) -> bool:
+    """우리가 만든 파일인가. 사람이 손으로 둔 파일은 건드리지 않는다."""
+    try:
+        head = path.read_text(encoding="utf-8")[:400]
+    except Exception:
+        return False
+    return head.startswith("---") and "\nparser:" in head
 
 
 def _plain(text: str) -> str:

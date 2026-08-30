@@ -162,7 +162,7 @@ def _bare_mnemonics(res, pat, bodies):
     OCR 이 대괄호를 통째로 흘리면 `확객시젠[종확나시]` 처럼 앞말이 맨몸으로
     남는다. 괄호를 우리가 지어내면 안 되므로(§4.8), 자리만 짚어 사람에게 넘긴다.
     """
-    rx = re.compile(r"(?<![\[`가-힣])([가-힣]{3,6})\s*`?\[")
+    rx = re.compile(r"(?<![\[`가-힣])([가-힣]{3,6})\s*`?\[(?!\^)")
     hits = 0
     for path, text in bodies.items():
         for m in rx.finditer(text):

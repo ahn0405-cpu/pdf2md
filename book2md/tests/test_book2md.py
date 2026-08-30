@@ -446,6 +446,27 @@ class 스캔본(unittest.TestCase):
         # 꼬리말은 본문에도 각주에도 들어가지 않는다
         self.assertNotIn("윤곽민사소송법", md)
 
+    def test_지난_결과물을_지우고_쓴다(self):
+        """옛 파일이 남으면 검증이 같은 내용을 두 번 세어 별표가 2배가 된다."""
+        from book2md.pipeline import Pipeline
+        out = self.tmp / "out3"
+        prof = get_profile(CFG, "textbook")
+
+        def run():
+            return Pipeline(self.pdf, CFG, prof, out / "기본서", out / "_reports",
+                            out / "_work", "pymupdf", None,
+                            log=lambda *a: None).run("extract")
+
+        run()
+        stale = out / "기본서" / "99_지난실행.md"
+        stale.write_text("---\nsource: 기본서\nparser: pymupdf\n---\n\n"
+                         "판시 (91다43695*) 이다.\n", encoding="utf-8")
+        hand = out / "기본서" / "손으로_쓴_메모.md"
+        hand.write_text("사람이 둔 파일. 프론트매터가 없다.\n", encoding="utf-8")
+        self.assertEqual(run(), "PASS")
+        self.assertFalse(stale.exists())       # 우리가 만든 옛 파일은 지운다
+        self.assertTrue(hand.exists())         # 사람이 둔 파일은 건드리지 않는다
+
     def test_두문자_복구가_기록에_남는다(self):
         """괄호만 되돌리고 안쪽 글자는 손대지 않았음을 사람이 볼 수 있어야 한다."""
         import json

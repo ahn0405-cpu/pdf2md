@@ -310,7 +310,7 @@ running:
   # 쪽 크기가 책마다 달라 절대 위치만으로는 못 잡는다.
   detect_repeating: true
   repeat_zone: 0.12
-  repeat_min_ratio: 0.35
+  repeat_min_ratio: 0.15
   repeat_sample: 40
   # 쪽 아래 이 비율보다 아래에 있으면서 아래 무늬에 맞으면 꼬리말로 본다.
   # 각주가 이 위에 오므로 각주와 겹치지 않는다.

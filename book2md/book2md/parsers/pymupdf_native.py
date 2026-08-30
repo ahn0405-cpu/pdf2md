@@ -442,13 +442,16 @@ def _merge_same_line(lines, overlap: float, max_gap: float = 1e9):
     return sorted(merged, key=lambda l: (l.zone == "footnote", round(l.y0, 1), l.x0))
 
 
-_RUNNING_STRIP = re.compile(r"[\s\d]+")
+#: 글자만 남긴다. OCR 이 쪽번호를 ']6!' 처럼 흘려 놓아 숫자만 빼서는
+#: 'CHAPTER 06 | 소송절차 개시 - ]6!' 이 쪽마다 다른 모양이 된다.
+_RUNNING_KEEP = re.compile(r"[^0-9A-Za-z가-힣一-鿿]+")
 
 
 def _running_key(text: str) -> str:
-    """숫자와 공백을 뺀 모양. 쪽번호만 다른 꼬리말을 한 덩어리로 묶는다."""
-    key = _RUNNING_STRIP.sub("", strip_markup(text or ""))
-    return key if len(key) >= 3 else ""
+    """쪽번호·장식을 뺀 모양. 쪽마다 되풀이되는 줄을 한 덩어리로 묶는다."""
+    key = _RUNNING_KEEP.sub("", strip_markup(text or ""))
+    key = re.sub(r"\d+", "", key)
+    return key if len(key) >= 4 else ""
 
 
 def _join_pieces(head: str, tail: str, gap: bool) -> str:

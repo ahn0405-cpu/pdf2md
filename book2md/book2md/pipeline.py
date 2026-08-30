@@ -145,8 +145,13 @@ class Pipeline:
     def split(self) -> list[str]:
         blocks = self._load_blocks()
         parts = split(blocks, self.prof)
-        written = write_parts(parts, self.out, self.prof, self.parser_name, "PENDING")
-        self.log(f"[분할] 파일 {len(written)}개 → {self.out}")
+        written, removed = write_parts(parts, self.out, self.prof,
+                                       self.parser_name, "PENDING")
+        note = f", 지난 결과 {len(removed)}개 지움" if removed else ""
+        self.log(f"[분할] 파일 {len(written)}개 → {self.out}{note}")
+        if removed:
+            self.log("        " + ", ".join(removed[:8]) +
+                     (" …" if len(removed) > 8 else ""))
         return written
 
     def _load_blocks(self) -> list[Block]:
