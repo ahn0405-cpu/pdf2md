@@ -393,10 +393,17 @@ def _outline(res, texts):
         wanted = [x.strip().strip('"') for x in om.group(1).split(",") if x.strip()]
         joined = " ".join(_key(t) for _, t in _HEAD.findall(body))
         missing = [w for w in wanted if _key(w) and _key(w) not in joined]
-        if missing:
+        if missing and len(missing) < len(wanted):
+            # 일부만 헤딩으로 섰다 = 절 목록인데 구멍이 났다. 이것이 §P0-1 의 증상이다.
             missing_total += len(missing)
             res.add("FAIL", "5.7 목차",
                     f"목차에 있는데 헤딩이 없다: {', '.join(missing[:8])}", "", path.name)
+        elif missing:
+            # 하나도 안 맞는다 = 절 목차가 아니라 문단 목차다
+            # ('의의 - 내용 - 예외 - 효과 + 관련논점'). 오류가 아니다.
+            res.add("INFO", "5.7 목차",
+                    f"목차 줄이 헤딩과 하나도 안 맞는다 (문단 목차로 보인다): "
+                    f"{', '.join(wanted[:6])}", "", path.name)
     res.counts["outline_missing"] = missing_total
 
 
@@ -441,6 +448,10 @@ def _emphasis_pages(res, cfg, baseline):
     emph = base.get("emphasis_by_page")
     pages = base.get("standard_pages")
     if emph is None or pages is None:
+        return
+    if base.get("color_source") != "image":
+        # 이 검사는 **쪽 그림에서 색을 읽는 경우**의 실패를 잡는 것이다.
+        # 글자에 색이 박힌 PDF 는 색을 흘릴 자리가 없어 셀 이유도 없다.
         return
     need = int(cfg["validation"].get("fail_on", {})
                .get("emphasis_per_standard_page", 5))

@@ -710,6 +710,25 @@ class 스캔본(unittest.TestCase):
         self.assertIn("154·윤곽민사소송법", removed)
         self.assertIn("sE-8", removed)
 
+    def test_로마자를_안_고치면_검증이_잡아낸다(self):
+        """§V1·§V5 — 절이 헤딩에서 탈락하면 목차 대조가 걸러야 한다.
+
+        이 검사가 없으면 절 하나가 조용히 사라진다. 실제로 그렇게 사라졌다.
+        """
+        import copy
+        from book2md.pipeline import Pipeline
+        cfg = copy.deepcopy(CFG)
+        cfg["normalize"]["roman_heads"] = {}          # 일부러 끈다
+        out = self.tmp / "out_noroman"
+        verdict = Pipeline(self.pdf, cfg, get_profile(cfg, "textbook"),
+                           out / "기본서", out / "_reports", out / "_work",
+                           "pymupdf", None, log=lambda *a: None).run("extract")
+        self.assertEqual(verdict, "FAIL")
+        warn = (out / "_reports" / "warnings.md").read_text(encoding="utf-8")
+        self.assertIn("목차에 있는데 헤딩이 없다", warn)
+        self.assertIn("소송물", warn)
+        self.assertIn("절 번호가 I → IV 로 건너뛴다", warn)
+
     def test_지난_결과물을_지우고_쓴다(self):
         """옛 파일이 남으면 검증이 같은 내용을 두 번 세어 별표가 2배가 된다."""
         from book2md.pipeline import Pipeline

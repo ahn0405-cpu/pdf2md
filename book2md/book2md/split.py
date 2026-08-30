@@ -196,7 +196,9 @@ def front_matter(part: Part, prof: dict, parser: str, validation: str) -> str:
         meta = b.meta or {}
         if meta.get("bonus_topic"):
             bonus.append(meta["bonus_topic"])
-        if meta.get("outline"):
+        if meta.get("outline") and not outline:
+            # 논점 제목 바로 아래의 윤곽 띠(§1.5 ①)가 절 목록이다. 절 안에
+            # 다시 나오는 띠('의의 - 내용 - 예외')는 문단 목차라 덮어쓰면 안 된다.
             outline = meta["outline"]
         if meta.get("exam_years"):
             years += [y for y in meta["exam_years"] if y not in years]
