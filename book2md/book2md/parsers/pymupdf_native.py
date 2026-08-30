@@ -14,7 +14,7 @@ import re
 from collections import Counter
 from typing import Iterator
 
-from ..color import Palette, is_black, to_rgb
+from ..color import ImageColorSampler, Palette, is_black, to_rgb
 from ..model import Line, Page
 from .base import Parser
 
@@ -96,23 +96,52 @@ class PyMuPDFParser(Parser):
                 [i for i in pages if 0 <= i < doc.page_count]
             step = max(1, len(idx) // 20)
             body_size = self._body_size(doc, idx[::step][:20] or idx[:1])
+            self.color_source = self._pick_color_source(doc, idx, color_cfg) \
+                if want_emphasis else "none"
 
             for i in idx:
                 page = doc[i]
                 rect = page.rect
+                sampler = ImageColorSampler(page, color_cfg) \
+                    if self.color_source == "image" else None
                 lines, sidenotes = self._page_lines(
                     page, body_size, opts, color_cfg, want_emphasis,
                     want_sidenote, side_rx, side_inline,
-                    rect.width * margin_ratio, i + 1)
+                    rect.width * margin_ratio, i + 1, sampler)
                 self._mark_zones(lines, rect.height, body_size, opts)
                 ordered = self._order(lines, rect.width, profile.get("columns", "auto"))
                 yield Page(number=i + 1, lines=ordered, width=rect.width,
                            height=rect.height, kind="layout", body_size=body_size,
                            sidenotes=sidenotes)
 
+    # ── 색을 어디서 읽을지 (§2.4) ────────────────────────────────
+    def _pick_color_source(self, doc, idx, color_cfg) -> str:
+        """span 색이냐 쪽 그림이냐.
+
+        스캔본에 OCR 텍스트가 얹힌 PDF 는 글자 색이 전부 검정이다. 저자가 칠한
+        강조는 그림 픽셀에만 남아 있으므로, span 에 유채색이 하나도 없으면
+        그림에서 읽는다. 판단을 표본 몇 쪽으로 끝내 전체 비용을 아낀다.
+        """
+        source = str(color_cfg.get("source", "auto")).lower()
+        if source in ("span", "image"):
+            return source
+        probe = idx[::max(1, len(idx) // 12)][:12] or idx[:1]
+        for i in probe:
+            for block in doc[i].get_text("dict")["blocks"]:
+                if block.get("type") != 0:
+                    continue
+                for line in block.get("lines", []):
+                    for span in line.get("spans", []):
+                        if not span["text"].strip():
+                            continue
+                        if not is_black(to_rgb(span.get("color", 0)), color_cfg):
+                            return "span"
+        return "image"
+
     # ── 한 페이지의 줄 ───────────────────────────────────────────
     def _page_lines(self, page, body_size, opts, color_cfg, want_emphasis,
-                    want_sidenote, side_rx, side_inline, margin_x, page_no):
+                    want_sidenote, side_rx, side_inline, margin_x, page_no,
+                    sampler=None):
         out: list[Line] = []
         sidenotes: list[dict] = []
         for block in page.get_text("dict")["blocks"]:
@@ -146,7 +175,16 @@ class PyMuPDFParser(Parser):
                     bold = bool(span["flags"] & _BOLD_FLAG) or "Bold" in span.get("font", "")
                     small = span["size"] < body_size * opts["sup_ratio"]
                     raised = base - span["origin"][1] > body_size * opts["sup_rise"]
-                    key = self.palette.add(rgb, raw, page_no) if self.palette else None
+                    if sampler is not None:
+                        hexed, _ = sampler.classify(span["bbox"])
+                        key = None
+                        if hexed:
+                            rgb = tuple(int(hexed[j:j + 2], 16) for j in (1, 3, 5))
+                            key = self.palette.add(rgb, raw, page_no)
+                        else:
+                            self.palette.total_spans += 1
+                    else:
+                        key = self.palette.add(rgb, raw, page_no) if self.palette else None
 
                     if small and raised and _DIGITS.match(raw.strip()):
                         # 확실한 각주 참조. 그 자리에서 [^n] 로 박는다 (§2.5)

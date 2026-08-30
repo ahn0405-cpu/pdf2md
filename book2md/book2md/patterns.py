@@ -32,6 +32,8 @@ class Patterns:
     year_max: int
     deny_words: tuple
     mnemonic_max_len: int
+    label_at_line_start: bool
+    mnemonic_unclosed: re.Pattern
 
     @classmethod
     def build(cls, cfg: dict) -> "Patterns":
@@ -58,14 +60,26 @@ class Patterns:
         )
 
         mn = pre["mnemonic"]
-        tok = rf"[가-힣]{{{mn['token_min']},{mn['token_max']}}}"
+        # 두문자 안에는 숫자가 섞이기도 한다([송완불2괴]). 다만 숫자만인 덩어리는
+        # 두문자가 아니므로 한글이 한 자 이상 있어야 한다.
+        tok = (rf"(?=[가-힣0-9]{{{mn['token_min']},{mn['token_max']}}})"
+               rf"[가-힣0-9]*[가-힣][가-힣0-9]*")
         inner = rf"{tok}(?:\s{tok}){{0,{max(0, mn['max_tokens'] - 1)}}}"
         # [^264] 는 '^' 때문에 걸리지 않는다. [텍스트](주소) 는 뒤의 '(' 로 걸러낸다.
-        mnemonic = re.compile(rf"\[(?P<body>{inner})\](?![(:])")
-        opens = "".join(a for a, _ in nrm["mnemonic_brackets"]) + "["
-        closes = "".join(b for _, b in nrm["mnemonic_brackets"]) + "]"
+        # 전각 대괄호도 함께 받는다. 정규화 전 원문(진단·probe)에도 쓰이기 때문이다.
+        mnemonic = re.compile(rf"[\[［](?P<body>{inner})[\]］](?![(:])")
+        # OCR 은 여는 괄호와 닫는 괄호를 서로 다른 글자로 흘린다: ［…】, 【…］, ｛…】.
+        # 그래서 짝을 맞추지 않고, 안쪽이 두문자 모양이면 받아들인다.
+        opens = "".join(a for a, _ in nrm["mnemonic_brackets"]) + "[［"
+        closes = "".join(b for _, b in nrm["mnemonic_brackets"]) + "]］"
         mnemonic_like = re.compile(
             rf"(?P<open>[{re.escape(opens)}])(?P<body>{inner})(?P<close>[{re.escape(closes)}])(?![(:])"
+        )
+        # 닫는 괄호를 통째로 흘린 경우: `(1) 원칙 ［일나시 나소시`(줄 끝).
+        # 줄 끝에 강조 마크업(==, **)이 붙어 있을 수 있다. 파서가 색을 먼저
+        # 입히고 그다음에 정규화가 돌기 때문이다.
+        mnemonic_unclosed = re.compile(
+            rf"(?P<open>[{re.escape(opens)}])(?P<body>{inner})\s*(?P<tail>(?:==|\*\*)?)\s*$"
         )
 
         date = re.compile(r"(?<!\d)(?P<y>\d{4})\.\s*(?P<m>\d{1,2})\.\s*(?P<d>\d{1,2})\.?")
@@ -88,7 +102,9 @@ class Patterns:
             known_suffixes=frozenset(pre["known_suffixes"]),
             year_min=int(pre["year_min"]), year_max=int(pre["year_max"]),
             deny_words=tuple(mn["deny_words"]),
-            mnemonic_max_len=int(mn.get("max_total_len", 9)),
+            mnemonic_max_len=int(mn.get("max_total_len", 10)),
+            label_at_line_start=bool(mn.get("label_at_line_start", True)),
+            mnemonic_unclosed=mnemonic_unclosed,
         )
 
     # ── 두문자 판정 ──────────────────────────────────────────────
@@ -105,9 +121,29 @@ class Patterns:
             return False
         return not any(w in body for w in self.deny_words)
 
+    def mnemonic_spans(self, text: str) -> list[tuple[int, int, str]]:
+        """두문자의 (시작, 끝, 안쪽글자). 줄 단위 자리를 함께 본다.
+
+        ③ 판례 제목 라벨은 줄 맨 앞(목록 번호 뒤 포함)에 온다
+        (`1) [청구확장 취지 명백히 표시]`). ② 두문자는 문장 가운데 온다
+        (`(1) 원칙 [일나시 나소시]`). 길이만으로는 `[반복적 재심청구]` 같은
+        8자짜리 라벨을 못 가르므로 자리를 함께 본다.
+        """
+        out = []
+        offset = 0
+        for line in text.split("\n"):
+            for m in self.mnemonic.finditer(line):
+                body = m.group("body")
+                if not self.is_mnemonic_body(body):
+                    continue
+                if self.label_at_line_start and _looks_like_label(line, m.start(), m.end()):
+                    continue
+                out.append((offset + m.start(), offset + m.end(), body))
+            offset += len(line) + 1
+        return out
+
     def find_mnemonics(self, text: str) -> list[str]:
-        return [m.group("body") for m in self.mnemonic.finditer(text)
-                if self.is_mnemonic_body(m.group("body"))]
+        return [body for _, _, body in self.mnemonic_spans(text)]
 
     # ── 사건번호 판정 (§5.1) ─────────────────────────────────────
     def find_cases(self, text: str) -> list[re.Match]:
@@ -126,3 +162,27 @@ class Patterns:
         if not serial.isdigit() or serial.startswith("0"):
             bad.append(f"일련번호 '{serial}' 이 이상")
         return bad
+
+
+_LIST_LEAD = re.compile(
+    r"^\s*(?:[-•‣▪·]|\(?\s*\d{1,2}\s*[).]|[가-하]\s*[.)]|[①-⑳]|[ⅰ-ⅹIVXi]{1,4}\s*[).])?\s*$"
+)
+
+
+def _looks_like_label(line: str, start: int, end: int) -> bool:
+    """③ 판례 제목 라벨인가.
+
+    라벨은 줄 맨 앞에 서고, 목록 번호를 달거나 뒤에 설명이 이어진다.
+        1) [청구확장 취지 명백히 표시] 확장의 뜻을 밝힌 때…
+    두문자는 문장 가운데 오거나, 줄에 홀로 선다.
+        (1) 원칙 [일나시 나소시] 로 본다.
+        [확객시전]
+    그래서 '맨 앞'만으로는 가르지 않고, 번호가 붙었는지·뒤에 말이 이어지는지를
+    함께 본다.
+    """
+    head = line[:start]
+    if not _LIST_LEAD.match(head):
+        return False                      # 문장 가운데 = 두문자
+    has_marker = bool(head.strip())
+    has_tail = bool(line[end:].strip())
+    return has_marker or has_tail

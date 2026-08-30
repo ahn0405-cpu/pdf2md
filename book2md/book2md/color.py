@@ -127,3 +127,102 @@ def report(palette: Palette) -> str:
 
 def _pct(part, whole) -> str:
     return f"{(100.0 * part / whole):.1f}%" if whole else "-"
+
+
+class ImageColorSampler:
+    """쪽 그림에서 색을 읽는다 (스캔본 + OCR 텍스트 레이어용).
+
+    이 교재는 종이를 스캔한 그림 위에 OCR 텍스트가 얹혀 있다. 그래서 글자 색은
+    전부 검정이고, 저자가 칠한 강조색은 **그림 픽셀에만** 남아 있다(§2.4).
+    글자 상자 안의 잉크 픽셀을 세어, 유채색이 충분히 섞여 있으면 강조로 본다.
+
+    쪽마다 픽셀을 딱 한 번 훑어 격자에 모아 둔다. 글자 상자마다 다시 훑으면
+    500쪽짜리에서 파이썬 반복이 수억 번 돌아 못 쓴다.
+    """
+
+    #: 격자 한 칸의 크기(pt). 글자 높이(8~11pt)보다 충분히 작아야 한다.
+    CELL = 3.0
+
+    def __init__(self, page, cfg: dict):
+        self.cfg = cfg
+        self.dpi = int(cfg.get("image_dpi", 110))
+        self.ink_max = int(cfg.get("ink_max", 205))
+        self.chroma_min = int(cfg.get("chroma_min", 42))
+        self.min_ratio = float(cfg.get("min_ratio", 0.34))
+        self.step = max(1, int(cfg.get("pixel_step", 2)))
+        self.scale = self.dpi / 72.0
+        self._page = page
+        self._grid = None
+        self.cols = self.rows = 0
+
+    # ── 쪽 한 번 훑기 ────────────────────────────────────────────
+    def _build(self):
+        import pymupdf
+
+        pix = self._page.get_pixmap(dpi=self.dpi, colorspace=pymupdf.csRGB, annots=False)
+        rect = self._page.rect
+        self.cols = max(1, int(rect.width / self.CELL) + 1)
+        self.rows = max(1, int(rect.height / self.CELL) + 1)
+        ink = [0] * (self.cols * self.rows)
+        chroma = [0] * (self.cols * self.rows)
+        rsum = [0] * (self.cols * self.rows)
+        gsum = [0] * (self.cols * self.rows)
+        bsum = [0] * (self.cols * self.rows)
+
+        samples = pix.samples
+        stride, n = pix.stride, pix.n
+        step = self.step
+        px_per_cell = self.CELL * self.scale
+        ink_max, chroma_min = self.ink_max, self.chroma_min
+
+        for y in range(0, pix.height, step):
+            row_base = y * stride
+            cell_row = int(y / px_per_cell) * self.cols
+            for x in range(0, pix.width, step):
+                o = row_base + x * n
+                r = samples[o]
+                g = samples[o + 1]
+                b = samples[o + 2]
+                hi = r if r > g else g
+                if b > hi:
+                    hi = b
+                if hi > ink_max:
+                    continue                        # 종이
+                lo = r if r < g else g
+                if b < lo:
+                    lo = b
+                k = cell_row + int(x / px_per_cell)
+                ink[k] += 1
+                if hi - lo >= chroma_min:
+                    chroma[k] += 1
+                    rsum[k] += r
+                    gsum[k] += g
+                    bsum[k] += b
+        self._grid = (ink, chroma, rsum, gsum, bsum)
+
+    # ── 글자 상자 하나 ───────────────────────────────────────────
+    def classify(self, bbox) -> tuple[str | None, float]:
+        """(대표색 또는 None, 유채색 비율)."""
+        if self._grid is None:
+            self._build()
+        ink_g, chroma_g, rsum, gsum, bsum = self._grid
+        c0 = max(0, int(bbox[0] / self.CELL))
+        c1 = min(self.cols - 1, int(bbox[2] / self.CELL))
+        r0 = max(0, int(bbox[1] / self.CELL))
+        r1 = min(self.rows - 1, int(bbox[3] / self.CELL))
+        ink = chroma = rs = gs = bs = 0
+        for row in range(r0, r1 + 1):
+            base = row * self.cols
+            for col in range(c0, c1 + 1):
+                k = base + col
+                ink += ink_g[k]
+                chroma += chroma_g[k]
+                rs += rsum[k]
+                gs += gsum[k]
+                bs += bsum[k]
+        if not ink:
+            return None, 0.0
+        ratio = chroma / ink
+        if ratio < self.min_ratio or not chroma:
+            return None, ratio
+        return to_hex((rs // chroma, gs // chroma, bs // chroma)), ratio

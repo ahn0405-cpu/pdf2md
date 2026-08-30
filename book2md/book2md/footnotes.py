@@ -18,7 +18,11 @@ from dataclasses import dataclass, field
 from .model import Page
 from .patterns import Patterns
 
-_NUM_HEAD = re.compile(r"^(\d{1,4})\s*[).\]]?\s+(\S.*)$")
+# 각주 정의 줄. 이 교재의 OCR 은 '270） 시효중단…' / '264 종전…' 두 꼴로 낸다.
+# 구분자에 '.' 을 넣지 않는다. 넣으면 '2011. 4. 26.' 이 각주 2011번이 돼 버린다.
+# 본문 첫 글자로 문장부호를 받지 않는 것도 같은 이유다.
+_NUM_HEAD = re.compile(
+    r"^(?P<n>\d{1,4})\s*(?P<sep>[)\]）])?\s*(?P<body>[^\s.,)\]].*)$")
 _SENT_END = ("다.", "다).", "함.", "음.", "요.", ".", "」", "’", '"', ")")
 
 
@@ -58,7 +62,9 @@ class FootnoteCollector:
         page.lines 는 본문만 남는다(각주 줄은 빠진다).
         """
         zone = [l for l in page.lines if l.zone == "footnote"]
-        if not zone and page.kind != "layout":
+        if not zone:
+            # 스캔본 OCR 은 글자 크기가 들쭉날쭉해 크기로는 각주 영역을 못 가른다.
+            # 그럴 때는 쪽 아래쪽에서 번호로 시작하는 줄 뭉치를 찾는다.
             zone = self._guess_zone(page)
         if not zone:
             body = [l for l in page.lines if l.zone in ("body", "header")]
@@ -88,8 +94,8 @@ class FootnoteCollector:
             text = line.stripped
             if not text:
                 continue
-            m = _NUM_HEAD.match(text)
-            n = int(m.group(1)) if m else None
+            m = _num_head(text)
+            n = int(m.group("n")) if m else None
             starts_new = (
                 m is not None
                 and self.lo <= n <= self.hi
@@ -98,7 +104,7 @@ class FootnoteCollector:
             if starts_new:
                 if current:
                     found.append(current)
-                current = Footnote(number=n, text=m.group(2).strip(), page=page_no)
+                current = Footnote(number=n, text=m.group("body").strip(), page=page_no)
                 self.state.last_number = n
                 self.state.pending = None
                 continue
@@ -127,10 +133,10 @@ class FootnoteCollector:
         tail = lines[-self.tail_lines:]
         start = None
         for k, line in enumerate(tail):
-            m = _NUM_HEAD.match(line.stripped)
+            m = _num_head(line.stripped)
             if not m:
                 continue
-            n = int(m.group(1))
+            n = int(m.group("n"))
             if not (self.lo <= n <= self.hi and n > self.state.last_number):
                 continue
             # 뒤로 이어지는 줄들이 각주다운지 본다: 번호가 오르거나 이어지는 문장
@@ -147,9 +153,9 @@ class FootnoteCollector:
     def _tail_is_footnotes(self, block) -> bool:
         numbers = []
         for line in block:
-            m = _NUM_HEAD.match(line.stripped)
+            m = _num_head(line.stripped)
             if m:
-                numbers.append(int(m.group(1)))
+                numbers.append(int(m.group("n")))
         if not numbers:
             return False
         if numbers != sorted(numbers):
@@ -164,7 +170,7 @@ class FootnoteCollector:
         아무 숫자나 참조로 바꾸지 않는다. 그 페이지(또는 바로 앞)에서 실제로
         정의를 본 번호만 바꾼다. 사건번호·연도·조문 번호는 건드리지 않는다.
         """
-        if page.kind == "layout" or not self.inline_from_numbers:
+        if not self.inline_from_numbers:
             return
         numbers = sorted({f.number for f in found}, reverse=True)
         if not numbers:
@@ -175,10 +181,14 @@ class FootnoteCollector:
                 continue
             guard = _protected_spans(self.pat, text)
             for n in numbers:
-                pat = re.compile(rf"(?<=[가-힣\)\]』」.])({n})(?![\d])")
+                if f"[^{n}]" in text:
+                    continue                    # 파서가 위첨자로 이미 살렸다
+                # 위첨자가 본문에 섞여 'NNN)' 또는 'NNN' 으로 떨어진다.
+                # 앞이 문장 끝이나 닫는 괄호일 때만 참조로 본다.
+                pat = re.compile(rf"(?<=[가-힣\)\]』」.])\s?({n})\s*[)）]?(?![\d])")
                 out, cursor = [], 0
                 for m in pat.finditer(text):
-                    if any(a <= m.start() < b for a, b in guard):
+                    if any(a <= m.start(1) < b for a, b in guard):
                         continue
                     out.append(text[cursor:m.start()])
                     out.append(f"[^{n}]")
@@ -208,3 +218,13 @@ def _join(head: str, tail: str) -> str:
     if head.endswith("-"):
         return head[:-1] + tail
     return head + " " + tail
+
+
+def _num_head(text: str):
+    """각주 정의 줄인가. 숫자만 있는 줄(쪽번호)은 아니다."""
+    m = _NUM_HEAD.match(text)
+    if not m:
+        return None
+    if m.group("sep") is None and not re.match(r"^\d{1,4}\s", text):
+        return None            # 번호와 본문 사이에 공백이 있어야 한다
+    return m

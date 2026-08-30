@@ -120,9 +120,9 @@ class Structurer:
                 self._in_roman = (level == 4)
                 self._last_item = 0
                 return
-        if self._is_outline(text):
+        items = self._outline_items(text)
+        if items:
             self._flush_para()
-            items = [t.strip() for t in re.split(self._outline["separator"], text) if t.strip()]
             self.blocks.append(self._mk("para", text, page=page_no,
                                         meta={"outline": items}))
             return
@@ -295,14 +295,28 @@ class Structurer:
         self._bonus, self._bonus_title = None, ""
 
     # ── ① 논점 윤곽 띠 ───────────────────────────────────────────
-    def _is_outline(self, text: str) -> bool:
-        if len(text) > 60:
-            return False
-        items = [t.strip() for t in re.split(self._outline["separator"], text) if t.strip()]
+    def _outline_items(self, text: str) -> list[str]:
+        """'& 의의 - 소송물 - 중복소제기 - 시효중단 - 기판력' 같은 띠를 가른다.
+
+        아는 낱말 수만으로 판정하면 교재마다 어휘가 달라 놓친다. 그래서 모양
+        (짧은 토막 여럿이 구분자로 이어지고 문장으로 끝나지 않는다)을 먼저 보고,
+        아는 낱말이 하나라도 있는지로 확인한다.
+        """
+        body = text.strip()
+        if len(body) > 60 or _SENT_END.search(body):
+            return []
+        lead = self._outline.get("lead_marker")
+        if lead:
+            body = re.sub(lead, "", body)
+        items = [t.strip() for t in re.split(self._outline["separator"], body) if t.strip()]
         if len(items) < int(self._outline["min_items"]):
-            return False
+            return []
+        if any(len(t) > int(self._outline.get("max_item_len", 10)) for t in items):
+            return []
         keys = set(self._outline["keywords"])
-        return sum(1 for t in items if t in keys) >= int(self._outline["min_items"])
+        if sum(1 for t in items if t in keys) < int(self._outline.get("min_known", 1)):
+            return []
+        return items
 
     # ── 블록 만들기 ──────────────────────────────────────────────
     def _mk(self, kind, text, level=0, page=0, meta=None) -> Block:
@@ -382,15 +396,23 @@ def _split_score(rx: re.Pattern | None, text: str, limit: float = 50,
 
 
 def _inline(pat: Patterns, text: str) -> str:
-    """두문자를 백틱으로 감싼다 (§6.1). 두 번 감싸지 않는다."""
-    def repl(m: re.Match) -> str:
-        if not pat.is_mnemonic_body(m.group("body")):
-            return m.group(0)
-        s, e = m.start(), m.end()
-        if text[max(0, s - 1):s] == "`" and text[e:e + 1] == "`":
-            return m.group(0)
-        return f"`{m.group(0)}`"
-    return pat.mnemonic.sub(repl, text)
+    """두문자를 백틱으로 감싼다 (§6.1).
+
+    자리까지 보고 고른 것만 감싼다. 줄 맨 앞 대괄호는 ③ 판례 제목 라벨이라
+    두문자가 아니다. 두 번 감싸지 않는다.
+    """
+    spans = pat.mnemonic_spans(text)
+    if not spans:
+        return text
+    out, cursor = [], 0
+    for start, end, _ in spans:
+        if text[max(0, start - 1):start] == "`" and text[end:end + 1] == "`":
+            continue
+        out.append(text[cursor:start])
+        out.append(f"`{text[start:end]}`")
+        cursor = end
+    out.append(text[cursor:])
+    return "".join(out)
 
 
 def _join_lines(lines: list[str], mode: str) -> str:

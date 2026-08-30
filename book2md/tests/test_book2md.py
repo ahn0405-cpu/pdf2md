@@ -313,6 +313,7 @@ class 종단(unittest.TestCase):
             raise unittest.SkipTest("한글 글꼴 없음")
         make_fixtures.textbook(cls.fix / "기본서.pdf")
         make_fixtures.casebook(cls.fix / "사례집.pdf")
+        make_fixtures.scanned_textbook(cls.fix / "스캔기본서.pdf")
 
     @classmethod
     def tearDownClass(cls):
@@ -359,6 +360,76 @@ class 종단(unittest.TestCase):
         self.assertEqual(mismatches, 1)                        # 확객시전 vs 확객시젠
         self.assertIn("확객시젠", text)
         self.assertIn("확객시전", text)
+
+
+class 스캔본(unittest.TestCase):
+    """실물 교재의 꼴: 종이 그림 + OCR 텍스트 레이어.
+
+    글자 색이 전부 검정이라 강조색은 그림에만 남고(§2.4), 여는 괄호가 `＜` 로,
+    닫는 대괄호는 통째로, 각주 참조는 `NNN)` 로 흘러나온다.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        try:
+            import pymupdf  # noqa: F401
+        except Exception:
+            raise unittest.SkipTest("PyMuPDF 없음")
+        sys.path.insert(0, str(ROOT / "tests"))
+        import make_fixtures
+        if not Path(make_fixtures.FONT).exists():
+            raise unittest.SkipTest("한글 글꼴 없음")
+        cls.tmp = Path(tempfile.mkdtemp())
+        cls.pdf = cls.tmp / "스캔기본서.pdf"
+        make_fixtures.scanned_textbook(cls.pdf)
+
+    @classmethod
+    def tearDownClass(cls):
+        shutil.rmtree(getattr(cls, "tmp", "/nonexistent"), ignore_errors=True)
+
+    def test_진단이_스캔본임을_알아채고_그림에서_색을_찾는다(self):
+        from book2md import diagnose
+        d = diagnose.run(str(self.pdf), CFG, sample=1, layout_pages=1)
+        self.assertTrue(d["images"]["scanned_with_text_layer"])
+        self.assertEqual(d["color"]["colored_spans"], 0)      # 글자 색은 전부 검정
+        self.assertEqual(d["color"]["source"], "image")
+        self.assertGreater(d["color"]["image_colored_spans"], 0)   # 그림에는 있다
+
+    def test_변환이_네_가지를_모두_지킨다(self):
+        from book2md.pipeline import Pipeline
+        out = self.tmp / "out"
+        prof = get_profile(CFG, "textbook")
+        verdict = Pipeline(self.pdf, CFG, prof, out / "기본서", out / "_reports",
+                           out / "_work", "pymupdf", None,
+                           log=lambda *a: None).run("extract")
+        md = next((out / "기본서").glob("*.md")).read_text(encoding="utf-8")
+        self.assertEqual(verdict, "PASS")
+        self.assertIn("(92재다226*)", md)          # ＜ → ( 복원 + 별표 보존
+        self.assertIn("(74다1557)", md)
+        self.assertIn("`[일나시 나소시]`", md)      # 빠진 닫는 괄호 복구
+        self.assertIn("==", md)                    # 그림에서 읽은 강조색
+        self.assertIn("[^100]:", md)               # 'NNN)' 각주 정의
+        self.assertIn("[^100]", md.split("[^100]:")[0])   # 본문 참조
+        self.assertIn("`sE-8`", md)                # 옆번호
+        self.assertIn("exam_years: [2011]", md)
+        self.assertIn("standard: true", md)
+
+    def test_두문자_복구가_기록에_남는다(self):
+        """괄호만 되돌리고 안쪽 글자는 손대지 않았음을 사람이 볼 수 있어야 한다."""
+        import json
+        from book2md.pipeline import Pipeline
+        out = self.tmp / "out2"
+        prof = get_profile(CFG, "textbook")
+        pipe = Pipeline(self.pdf, CFG, prof, out / "기본서", out / "_reports",
+                        out / "_work", "pymupdf", None, log=lambda *a: None)
+        pipe.run("extract")
+        rows = [json.loads(l) for l in pipe.changes.read_text(encoding="utf-8").splitlines()]
+        kinds = {r["kind"] for r in rows}
+        self.assertIn("bracket", kinds)            # ＜ → (
+        self.assertIn("mnemonic", kinds)           # 닫는 대괄호 복구
+        for r in rows:
+            if r["kind"] == "mnemonic":
+                self.assertIn("일나시 나소시", r["after"])   # 안쪽 글자 그대로
 
 
 if __name__ == "__main__":

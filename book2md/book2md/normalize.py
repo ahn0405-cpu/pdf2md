@@ -43,6 +43,8 @@ class Normalizer:
         self.fullwidth_brackets = bool(n.get("fullwidth_brackets", True))
         self.fullwidth_alnum = bool(n.get("fullwidth_alnum", True))
         self.mnemonic_pairs = [tuple(p) for p in n.get("mnemonic_brackets", [])]
+        self.repair_unclosed = bool(
+            cfg["preserve"]["mnemonic"].get("repair_unclosed", True))
         self.noise_chars = sorted(n.get("noise_chars", []), key=len, reverse=True)
         self.noise_tokens = set(n.get("noise_tokens", []))
         self.collapse = bool(n.get("collapse_spaces", True))
@@ -81,14 +83,16 @@ class Normalizer:
 
     # ── 두문자 대괄호 복구 (§2.2) ─────────────────────────────────
     def _mnemonic_brackets(self, text: str, page_no: int, changes: list[Change]) -> str:
-        pairs = {a: b for a, b in self.mnemonic_pairs}
+        """괄호만 되돌린다. 안쪽 글자는 손대지 않는다.
 
+        OCR 은 여는 괄호와 닫는 괄호를 서로 다른 글자로 흘린다(`［…】`, `【…］`,
+        `｛…】`). 짝이 안 맞아도 안쪽이 두문자 모양이면 대괄호로 되돌린다.
+        닫는 괄호를 통째로 흘린 경우(`(1) 원칙 ［일나시 나소시`)도 되살린다.
+        되살린 자리는 모두 기록에 남겨 사람이 확인할 수 있게 한다.
+        """
         def repl(m: re.Match) -> str:
             body = m.group("body")
-            o, c = m.group("open"), m.group("close")
-            if o == "[" and c == "]":
-                return m.group(0)
-            if pairs.get(o) != c:
+            if m.group("open") == "[" and m.group("close") == "]":
                 return m.group(0)
             if not self.pat.is_mnemonic_body(body):
                 return m.group(0)
@@ -96,7 +100,17 @@ class Normalizer:
                                   _ctx(text, m.start(), m.end())))
             return f"[{body}]"
 
-        return self.pat.mnemonic_like.sub(repl, text)
+        text = self.pat.mnemonic_like.sub(repl, text)
+        if self.repair_unclosed:
+            m = self.pat.mnemonic_unclosed.search(text)
+            if m and self.pat.is_mnemonic_body(m.group("body")):
+                tail = m.group("tail") or ""
+                fixed = text[:m.start()] + f"[{m.group('body')}]" + tail
+                changes.append(Change(page_no, "mnemonic", m.group(0),
+                                      f"[{m.group('body')}]" + tail,
+                                      _ctx(text, m.start(), m.end())))
+                text = fixed
+        return text
 
     # ── 사건번호 둘레 정리 (§2.1) ─────────────────────────────────
     def _cases(self, text: str, page_no: int, changes: list[Change]) -> str:

@@ -220,10 +220,67 @@ def casebook(path: Path):
     doc.close()
 
 
+# ── 스캔본 + OCR 텍스트 레이어 ────────────────────────────────────
+# 실물 교재가 이 꼴이다. 종이를 찍은 그림 위에 OCR 글자가 보이지 않게 얹혀 있다.
+#   · 글자 색은 전부 검정 → 강조색은 그림 픽셀에만 남는다 (§2.4)
+#   · 여는 괄호가 ＜ 로 흘러나온다 (§2.1)
+#   · 닫는 대괄호가 통째로 빠진다 (§2.2)
+#   · 각주 참조가 위첨자가 아니라 'NNN)' 으로 떨어진다 (§2.5)
+def scanned_textbook(path: Path):
+    """(종이 모양, OCR 글자) 짝을 만들어 스캔본 PDF 를 짓는다."""
+    W, H, M = 460, 620, 46
+    rows = [
+        # (y,  종이에 인쇄된 글자,                      색,    OCR 이 흘린 글자)
+        (70,  "051 시효중단", BLACK, "051 시효중단"),
+        (92,  "◎ 의의-방식-시기+관련논점", BLACK, "◎ 의의-방식-시기+관련논점"),
+        (118, "I. 의의 및 취지", BLACK, "I. 의의 및 취지"),
+        (140, "소를 제기하면 시효중단 효력이 있다(제265조).100)", BLACK,
+              "소를 제기하면 시효중단 효력이 있다(제265조). 100)"),
+        (170, "IV. 시효중단(11)", BLACK, "IV. 시효중단(11)"),
+        (196, "1. 문제점", BLACK, "1 .문제점"),
+        (218, "일부청구의 시효중단 범위가 문제된다(92재다226*).", BLACK,
+              "일부청구의 시효중단 범위가 문제된다＜92재다226*)."),
+        (244, "3. 判例", BLACK, "3. 判例"),
+        (266, "(1) 원칙", BLACK, "(1) 원칙"),
+        (288, "[일나시 나소시]", BLUE, "［일나시 나소시"),
+        (310, "나머지 부분은 시효중단 효력이 없다(74다1557).", BLACK,
+              "나머지 부분은 시효중단 효력이 없다＜74다1557)."),
+        (332, "4. 검토", BLACK, "4. 검토"),
+        (354, "확장의 뜻을 밝힌 때에는 전부에 미친다", BLUE,
+              "확장의 뜻을 밝힌 때에는 전부에 미친다"),
+        (376, "고 본다(91다43695*).", BLACK, "고 본다＜91다43695*)."),
+    ]
+    foot = (560, "100) 시효중단. 법률상 기간준수는 소제기시를 기준으로 판단한다.")
+
+    paper = pymupdf.open()
+    page = paper.new_page(width=W, height=H)
+    page.insert_font(fontname="wqy", fontfile=FONT)
+    for y, shown, color, _ in rows:
+        page.insert_text((M, y), shown, fontname="wqy", fontsize=9, color=color)
+    page.insert_text((W - M - 24, 170), "sE-8", fontname="wqy", fontsize=7, color=BLACK)
+    page.draw_line(pymupdf.Point(M, foot[0] - 10), pymupdf.Point(M + 120, foot[0] - 10),
+                   color=BLACK, width=0.6)
+    page.insert_text((M, foot[0]), foot[1], fontname="wqy", fontsize=7, color=BLACK)
+    pix = page.get_pixmap(dpi=200)
+    paper.close()
+
+    scan = pymupdf.open()
+    out = scan.new_page(width=W, height=H)
+    out.insert_image(pymupdf.Rect(0, 0, W, H), pixmap=pix)
+    out.insert_font(fontname="wqy", fontfile=FONT)
+    for y, _, _, ocr in rows:
+        out.insert_text((M, y), ocr, fontname="wqy", fontsize=9, render_mode=3)
+    out.insert_text((W - M - 24, 170), "sE-8", fontname="wqy", fontsize=7, render_mode=3)
+    out.insert_text((M, foot[0]), foot[1], fontname="wqy", fontsize=7, render_mode=3)
+    scan.save(str(path))
+    scan.close()
+
+
 if __name__ == "__main__":
     out = Path(sys.argv[1] if len(sys.argv) > 1 else "tests/fixtures")
     out.mkdir(parents=True, exist_ok=True)
     textbook(out / "기본서.pdf")
     casebook(out / "사례집.pdf")
+    scanned_textbook(out / "스캔기본서.pdf")
     for p in sorted(out.glob("*.pdf")):
         print(f"{p}  {p.stat().st_size:,} bytes")
