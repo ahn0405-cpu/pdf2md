@@ -243,7 +243,7 @@ class 검증(unittest.TestCase):
     def tearDown(self):
         shutil.rmtree(self.dir, ignore_errors=True)
 
-    def _write(self, body, fm='---\nsource: 기본서\ncases:\n'):
+    def _write(self, body, fm='---\nsource: 기본서\nparser: pymupdf\ncases:\n'):
         (self.dir / "a.md").write_text(fm + "---\n\n" + body, encoding="utf-8")
 
     def test_별표_개수_불일치는_FAIL(self):
@@ -271,7 +271,7 @@ class 검증(unittest.TestCase):
 
     def test_프론트매터의_사건번호_누락은_FAIL(self):
         (self.dir / "a.md").write_text(
-            '---\nsource: 기본서\ncases:\n  - id: "74다1557"\n---\n\n'
+            '---\nsource: 기본서\nparser: pymupdf\ncases:\n  - id: "74다1557"\n---\n\n'
             "판시 (91다43695) 이다.\n", encoding="utf-8")
         res = validate(self.dir, CFG, {"pages": 1})
         self.assertTrue(any("프론트매터" in f.check and f.level == "FAIL"

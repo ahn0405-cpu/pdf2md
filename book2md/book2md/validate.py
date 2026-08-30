@@ -74,10 +74,28 @@ def md_files(root: Path) -> list[Path]:
     return sorted(out)
 
 
+def _is_ours(path: Path) -> bool:
+    """우리가 만든 결과물인가.
+
+    사람이 출력 폴더에 둔 메모까지 검증하면 그 안의 사건번호가 caselist 에
+    섞이고 별표 수가 어긋난다. 프론트매터에 parser 가 적힌 것만 본다.
+    """
+    try:
+        head = path.read_text(encoding="utf-8")[:400]
+    except Exception:
+        return False
+    return head.startswith("---") and "\nparser:" in head
+
+
 def validate(root, cfg: dict, baseline: dict | None = None) -> Result:
     pat = Patterns.build(cfg)
     res = Result()
-    files = md_files(Path(root))
+    found = md_files(Path(root))
+    files = [p for p in found if _is_ours(p)]
+    skipped = [p.name for p in found if p not in files]
+    if skipped:
+        res.add("INFO", "입력", "우리가 만든 파일이 아니라 건너뛴다: " +
+                ", ".join(skipped[:8]))
     if not files:
         res.add("FAIL", "입력", f"검증할 .md 파일이 없다: {root}")
         return res
