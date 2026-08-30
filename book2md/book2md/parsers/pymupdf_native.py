@@ -101,6 +101,9 @@ class PyMuPDFParser(Parser):
                 "strip_small_in_band", True)),
             footer_rx=[re.compile(x) for x in
                        cfg.get("running", {}).get("footer_patterns", [])],
+            footer_rx_any=[re.compile(x) for x in
+                           cfg.get("running", {}).get(
+                               "footer_patterns_anywhere", [])],
             size_ratio=float(fn.get("size_ratio", 0.92)),
             bottom_zone=float(fn.get("bottom_zone", 0.42)),
             sup_ratio=float(fn.get("superscript_size_ratio", 0.82)),
@@ -375,18 +378,24 @@ class PyMuPDFParser(Parser):
             # 벗어나 앉는다. 자리(첫 줄·끝 줄)로도 함께 본다.
             at_top = line.y1 <= height * zone or id(line) == top_id
             in_band = at_top or line.y0 >= height * (1 - zone)
-            # 되풀이 지문은 자리를 가리지 않는다. OCR 이 앞뒤에 잡글자를 붙여
-            # 놓아도('O과 nr CHAPTER 6 소송절차 개시 nr“') 지문이 그 안에
-            # 들어 있으면 머리말이다. 다만 **본문보다 작을 때만** — 진짜
-            # 장 제목('CHAPTER 05 소송물')은 본문보다 크다.
-            if (not in_band and running and line.size < small
-                    and _running_inside(strip_markup(line.stripped), running)):
-                line.zone = "header"
-                continue
+            # 자리를 가리지 않는 검사. 장 제목 띠는 여백이 넉넉한 쪽에서 띠를
+            # 벗어나 앉는다. 그렇다고 띠를 넓히면 본문을 먹으므로, 근거가
+            # 확실한 것만 자리 없이 본다. 둘 다 **본문보다 작을 때만** —
+            # 진짜 장 제목('CHAPTER 05 소송물')은 본문보다 크다.
+            #   ① 무늬가 확실한 것 (footer_patterns_anywhere)
+            #   ② 되풀이 지문이 줄 안에 들어 있는 것. OCR 이 앞뒤에 잡글자를
+            #      붙여 놓아도('O과 nr CHAPTER 6 …') 지문이 있으면 머리말이다.
+            if not in_band and line.size < small:
+                plain_any = strip_markup(line.stripped)
+                if (any(rx.search(plain_any) for rx in opts["footer_rx_any"])
+                        or (running and _running_inside(plain_any, running))):
+                    line.zone = "header"
+                    continue
             if not in_band:
                 continue
             plain = strip_markup(line.stripped)
-            if any(rx.search(plain) for rx in opts["footer_rx"]):
+            if any(rx.search(plain) for rx in
+                   opts["footer_rx"] + opts["footer_rx_any"]):
                 line.zone = "header"        # 머리말·꼬리말은 본문이 아니다 (§4.1)
             elif running and _running_key(plain) in running:
                 line.zone = "header"        # 쪽마다 되풀이되는 줄

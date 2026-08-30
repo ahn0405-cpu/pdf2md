@@ -715,6 +715,7 @@ class 스캔본(unittest.TestCase):
         # §P2-1 무엇을 버렸는지 남긴다
         removed = (out / "_reports" / "removed_lines.md").read_text(encoding="utf-8")
         self.assertIn("己厂", removed)
+        # 띠를 벗어나 앉은 장 제목 띠. 무늬가 확실한 것은 자리를 안 가린다.
         self.assertIn("CHAPTER 6 소송절차 개시", removed)
         # 각주의 뒷줄은 짧고 번호로 시작하지 않아도 버리지 않는다.
         # 읽히는 한국어인지로 가른다 (§4.1).

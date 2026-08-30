@@ -357,7 +357,9 @@ def scanned_textbook(path: Path):
     # 작고 짧은 줄이라는 것으로 가른다 (§4.1).
     footer = (676, "O과 己厂—I !", 7.6)
     # 쪽 맨 위의 장 제목 띠. 이 책은 위에도 아래에도 띠가 있다.
-    runhead = (62, "O과 nr CHAPTER 6 소송절차 개시 nr", 7.6)
+    runhead = (62, "O과 己厂—I !", 7.6)
+    # 띠(위 12%)를 벗어나 앉은 장 제목 띠. 175쪽이 이랬다. 무늬로만 잡힌다.
+    strayhead = (105, "O과 nr CHAPTER 6 소송절차 개시 nr", 7.6)
 
     paper = pymupdf.open()
     page = paper.new_page(width=W, height=H)
@@ -373,6 +375,8 @@ def scanned_textbook(path: Path):
                      fontsize=footer[2], color=B)
     page.insert_text((M, runhead[0]), runhead[1], fontname="wqy",
                      fontsize=runhead[2], color=B)
+    page.insert_text((M + 200, strayhead[0]), strayhead[1], fontname="wqy",
+                     fontsize=strayhead[2], color=B)
     pix = page.get_pixmap(dpi=200)
     paper.close()
 
@@ -390,6 +394,8 @@ def scanned_textbook(path: Path):
                     fontsize=footer[2], render_mode=3)
     out.insert_text((M, runhead[0]), runhead[1], fontname="wqy",
                     fontsize=runhead[2], render_mode=3)
+    out.insert_text((M + 200, strayhead[0]), strayhead[1], fontname="wqy",
+                    fontsize=strayhead[2], render_mode=3)
     scan.save(str(path))
     scan.close()
 
