@@ -42,8 +42,8 @@ pip install -r requirements.txt          # PyYAML + PyMuPDF
 ./convert validate output
 ./convert crosscheck output/기본서 output/사례집
 
-# 5) 기본서 ↔ 사례집 매핑 (변환이 끝난 뒤)
-./mapping build output/기본서 output/사례집 -o mapping.yaml
+# 5) 기본서 ↔ 사례집 매핑 (변환이 끝난 뒤). 출력 루트만 주면 된다.
+./mapping build output -o mapping.yaml
 ./mapping review mapping.yaml
 ./mapping confirm mapping.yaml --section "IV. 시효중단"
 ./mapping validate mapping.yaml
@@ -142,8 +142,14 @@ output/
 단계가 사안을 지어낸다.
 
 ```bash
-./mapping build output/기본서 output/사례집 -o mapping.yaml
+./mapping build output -o mapping.yaml
 ```
+
+**출력 루트 하나만 주면 된다.** 어느 파일이 기본서고 어느 파일이 사례집인지는
+폴더 이름이 아니라 프론트매터의 `source:` 로 가른다. 폴더 이름은 사람이 정하는
+것이라(`윤곽 민소법 기본서`, `윤곽 민소 사례집 상`) 짐작하다 잘못 짚으면 매핑이
+통째로 헛돈다. `source:` 는 변환할 때 우리가 프로파일 이름표를 직접 적어 넣은
+것이라 틀릴 수가 없다. 폴더를 여러 개 줘도 된다.
 
 근거 셋을 세어 점수를 매긴다.
 

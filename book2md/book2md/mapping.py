@@ -104,16 +104,43 @@ class Problem:
 
 
 # ── 읽기 ────────────────────────────────────────────────────────
-def _md_files(root: Path) -> list[Path]:
-    out = []
-    for p in sorted(Path(root).rglob("*.md")):
-        rel = p.relative_to(root).parts
-        if any(part.startswith("_") for part in rel[:-1]):
-            continue
-        if p.name == "README.md" or not is_generated(p):
-            continue
-        out.append(p)
+def _md_files(roots) -> list[Path]:
+    """준 폴더들 아래의 우리 결과물 md. `_reports` `_work` 는 건너뛴다."""
+    if isinstance(roots, (str, Path)):
+        roots = [roots]
+    out, seen = [], set()
+    for root in roots:
+        root = Path(root)
+        for p in sorted(root.rglob("*.md")):
+            rel = p.relative_to(root).parts
+            if any(part.startswith("_") for part in rel[:-1]):
+                continue
+            if p.name == "README.md" or not is_generated(p):
+                continue
+            key = p.resolve()
+            if key in seen:
+                continue
+            seen.add(key)
+            out.append(p)
     return out
+
+
+def sort_by_source(roots, cfg: dict) -> tuple[list, list, list]:
+    """어느 파일이 기본서고 어느 파일이 사례집인가.
+
+    폴더 이름으로 가르지 않는다. 사장님이 어떤 이름으로 저장해 두었는지 우리는
+    모르고, 이름을 잘못 짚으면 사례집을 기본서로 읽어 매핑이 통째로 헛돈다.
+    프론트매터의 `source:` 는 우리가 프로파일 이름표를 직접 적어 넣은 것이라
+    틀릴 수가 없다.
+    """
+    profs = cfg.get("profiles") or {}
+    tb_label = (profs.get("textbook") or {}).get("label", "기본서")
+    cb_label = (profs.get("casebook") or {}).get("label", "사례집")
+    tb, cb, other = [], [], []
+    for path in _md_files(roots):
+        src = _front(path.read_text(encoding="utf-8")).get("source", "").strip('"')
+        (tb if src == tb_label else cb if src == cb_label else other).append(path)
+    return tb, cb, other
 
 
 def _front(text: str) -> dict:
@@ -128,14 +155,14 @@ def _front(text: str) -> dict:
     return out
 
 
-def read_textbook(root, pat: Patterns) -> list[Section]:
+def read_textbook(files, pat: Patterns) -> list[Section]:
     """기본서에서 절을 뽑는다. 절마다 그 안의 사건번호·두문자를 모은다.
 
     프론트매터의 cases 는 **파일 전체** 것이라 절 단위 대조에 못 쓴다.
     헤딩 사이 본문을 갈라 절마다 따로 센다.
     """
     out: list[Section] = []
-    for path in _md_files(root):
+    for path in files:
         text = path.read_text(encoding="utf-8")
         chapter = _front(text).get("chapter", "").strip('"')
         body = _FM.sub("", text)
@@ -165,10 +192,10 @@ def read_textbook(root, pat: Patterns) -> list[Section]:
     return out
 
 
-def read_casebook(root, pat: Patterns) -> list[Problem]:
+def read_casebook(files, pat: Patterns) -> list[Problem]:
     """사례집에서 문제를 뽑는다. 답안 목차와 배점도 함께."""
     out: list[Problem] = []
-    for path in _md_files(root):
+    for path in files:
         text = path.read_text(encoding="utf-8")
         body = _FM.sub("", text)
         cur: Problem | None = None
@@ -272,12 +299,14 @@ class Match:
                    (self.keywords, self.cases, self.mnemonics or self.near))
 
 
-def build(textbook_dir, casebook_dirs, cfg: dict) -> dict:
+def build(roots, cfg: dict) -> dict:
+    """폴더(들)을 통째로 받아 기본서·사례집을 갈라 읽고 매핑한다."""
+    if isinstance(roots, (str, Path)):
+        roots = [roots]
     pat = Patterns.build(cfg)
-    sections = read_textbook(textbook_dir, pat)
-    problems: list[Problem] = []
-    for d in casebook_dirs:
-        problems.extend(read_casebook(d, pat))
+    tb_files, cb_files, other = sort_by_source(roots, cfg)
+    sections = read_textbook(tb_files, pat)
+    problems = read_casebook(cb_files, pat)
 
     by_section: dict[int, list[Match]] = {}
     used: set = set()
@@ -295,7 +324,8 @@ def build(textbook_dir, casebook_dirs, cfg: dict) -> dict:
                 if m.score >= 2:
                     used.add(prob.id)
     return {"sections": sections, "problems": problems,
-            "matches": by_section, "used": used}
+            "matches": by_section, "used": used,
+            "files": {"textbook": tb_files, "casebook": cb_files, "other": other}}
 
 
 # ── YAML ────────────────────────────────────────────────────────

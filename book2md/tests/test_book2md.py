@@ -1234,7 +1234,7 @@ parser: pymupdf
             cls.CASEBOOK, encoding="utf-8")
         from book2md import mapping as M
         cls.M = M
-        cls.data = M.build(cls.tmp / "기본서", [cls.tmp / "사례집"], CFG)
+        cls.data = M.build([cls.tmp], CFG)
         cls.path = cls.tmp / "mapping.yaml"
         cls.path.write_text(M.to_yaml(cls.data), encoding="utf-8")
         cls.doc = M.load(cls.path)
@@ -1296,6 +1296,14 @@ parser: pymupdf
         self.assertEqual(self._row("II. 소송물")["score"], 1)
         self.assertNotIn("II. 소송물",
                          [r["textbook"]["section"] for r in self.doc["mappings"]])
+
+    def test_폴더_이름이_아니라_프론트매터로_가른다(self):
+        """폴더 이름은 사장님이 정하는 것이라 믿을 수 없다. source: 는 우리가 적었다."""
+        f = self.data["files"]
+        self.assertEqual([p.name for p in f["textbook"]], ["45_046일부청구.md"])
+        self.assertEqual([p.name for p in f["casebook"]],
+                         ["E_명시적일부청구중복소제기.md"])
+        self.assertEqual(f["other"], [])
 
     def test_짝이_없는_절은_unmapped_에_남긴다(self):
         self.assertIn("I. 의의", self.doc["unmapped"]["textbook_sections"])

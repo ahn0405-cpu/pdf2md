@@ -105,8 +105,9 @@ def main(argv=None) -> int:
     mp = sub.add_parser("mapping", help="기본서 ↔ 사례집 매핑 (mapping_생성지침.md)")
     msub = mp.add_subparsers(dest="sub", required=True)
     mb = msub.add_parser("build", help="근거를 세어 mapping.yaml 을 만든다")
-    mb.add_argument("textbook", help="기본서 md 폴더")
-    mb.add_argument("casebook", nargs="+", help="사례집 md 폴더 (여러 개 가능)")
+    mb.add_argument("dirs", nargs="+",
+                    help="변환 결과 폴더. 출력 루트 하나만 줘도 된다 — "
+                         "기본서·사례집은 프론트매터 source: 로 가른다")
     mb.add_argument("-o", "--out", default="mapping.yaml")
     mr = msub.add_parser("review", help="승인 대기 목록")
     mr.add_argument("path", nargs="?", default="mapping.yaml")
@@ -131,20 +132,35 @@ def _cmd_mapping(args, cfg) -> int:
 
 
 def _map_build(args, cfg) -> int:
-    tb = Path(args.textbook)
-    dirs = [Path(d) for d in args.casebook]
-    for d in [tb, *dirs]:
+    dirs = [Path(d) for d in args.dirs]
+    for d in dirs:
         if not d.is_dir():
             print(f"폴더가 없다: {d}", file=sys.stderr)
+            here = d.parent if d.parent.is_dir() else Path(".")
+            subs = [p.name for p in sorted(here.iterdir()) if p.is_dir()]
+            if subs:
+                print(f"`{here}` 안에 있는 폴더: " +
+                      ", ".join(f'"{x}"' for x in subs), file=sys.stderr)
             return 2
-    data = map_mod.build(tb, dirs, cfg)
+    data = map_mod.build(dirs, cfg)
+    files = data["files"]
+    if not files["textbook"] or not files["casebook"]:
+        print("기본서 {}개 · 사례집 {}개 — 한쪽이 비었다.".format(
+            len(files["textbook"]), len(files["casebook"])), file=sys.stderr)
+        print("변환 결과의 프론트매터 `source:` 로 가른다. 두 책을 다 담은 "
+              "출력 루트를 주었는지 확인할 것.", file=sys.stderr)
+        return 2
     out = Path(args.out)
-    out.parent.mkdir(parents=True, exist_ok=True)
+    if out.parent != Path(""):
+        out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(map_mod.to_yaml(data), encoding="utf-8")
     strong = sum(1 for ms in data["matches"].values()
                  if max(m.score for m in ms) >= 2)
     weak = len(data["matches"]) - strong
-    print(f"기본서 절 {len(data['sections'])}개 · 사례집 문제 {len(data['problems'])}개")
+    print(f"기본서 md {len(files['textbook'])}개 → 절 {len(data['sections'])}개 · "
+          f"사례집 md {len(files['casebook'])}개 → 문제 {len(data['problems'])}개")
+    if files["other"]:
+        print(f"※ source: 를 알아볼 수 없어 건너뛴 파일 {len(files['other'])}개")
     print(f"매핑 {strong}건 · 후보 {weak}건 → {out}")
     print("**아직 하나도 승인되지 않았다.** `mapping review` 로 보고 "
           "`mapping confirm` 으로 승인할 것.")
