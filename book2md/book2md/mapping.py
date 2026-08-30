@@ -377,7 +377,13 @@ def _ans_hit(section: Section, prob: Problem, cfg: dict) -> list[str]:
 
 
 def _role(section: Section, prob: Problem) -> tuple[str, float | None]:
-    """답안 목차의 배점으로 역할을 가른다 (지침 §role).
+    """이 문제의 사안을 이 절에 갖다 써도 되는가 (지침 §role).
+
+    절이 중요한가를 재는 것이 아니다. 사례집 문제가 **그 논점을 묻자고 만든
+    문제인지**를 잰다. primary 면 그 사안을 이 절의 대표 사안으로 실을 수 있고,
+    incidental 이면 스치듯 지나간 것이라 대표 사안으로 쓰면 안 된다.
+
+    척도는 답안 목차 배점이다 — 그 문제에서 이 논점에 몇 점이 걸렸나.
 
     배점을 못 찾으면 composite 으로 둔다. 어림짐작으로 primary 를 주면
     사람이 그냥 넘길 위험이 있는데, 이 판단은 사람이 해야 한다.
@@ -396,7 +402,12 @@ def _role(section: Section, prob: Problem) -> tuple[str, float | None]:
              if a.level == 3 and a.points is not None]
     if known and pts >= max(known):
         return "primary", pts
-    total = prob.points or (sum(known) if known else 0)
+    # 25% 의 분모는 **읽은 배점의 합**이다. 총점을 쓰면 배점을 덜 읽었을 때
+    # 비율이 낮아져 role 이 사안 적합도가 아니라 OCR 성공률을 재게 된다.
+    # 실측: E-6 의 기판력은 4점, 총점 20 이면 20% 라 incidental 로 떨어지지만
+    # 읽은 합 14.5 기준으로는 27.6% 로 composite 다 — 지침 정답지와 맞는다.
+    # 총점은 M4 검산에만 쓴다.
+    total = sum(known) if known else (prob.points or 0)
     if total and pts >= total * 0.25:
         return "composite", pts
     return "incidental", pts

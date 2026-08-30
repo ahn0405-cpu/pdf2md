@@ -1474,8 +1474,26 @@ parser: pymupdf
         self.assertEqual(c["role"], "primary")
         self.assertEqual(c["section_points"], 4)
 
+    def test_25퍼센트의_분모는_총점이_아니라_읽은_배점의_합(self):
+        """총점을 쓰면 배점을 덜 읽었을 때 role 이 낮게 나온다.
+
+        role 은 '이 문제의 사안을 이 절에 써도 되는가' 지 'OCR 이 잘 됐는가'
+        가 아니다. 실측 E-6: 기판력 4점, 총점 20 이면 20% 로 incidental 이지만
+        읽은 합 14.5 기준 27.6% 로 composite — 지침 정답지와 맞는다.
+        """
+        from book2md.mapping import Section, Problem, Answer, _role
+        sec = Section(chapter="046 일부청구", title="V. 기판력", file="x")
+        prob = Problem(id="E-6", title="일부청구-기판력, 시효중단", file="y",
+                       points=20,          # 지문 끝의 총점
+                       answers=[Answer("1. 문제의 소재", 1.0),
+                                Answer("2. 일부청구 소송물", 3.0),
+                                Answer("3. 기판력 저촉 여부", 4.0),
+                                Answer("4. 시효중단 범위", 6.0),
+                                Answer("5. 사안해결", 0.5)])
+        self.assertEqual(_role(sec, prob), ("composite", 4.0))
+
     def test_최대가_아니어도_25퍼센트면_composite(self):
-        """E-6 의 기판력은 4/12 — 최대(6)는 아니지만 25% 는 넘는다."""
+        """E-6 의 기판력은 4/14.5 — 최대(6)는 아니지만 25% 는 넘는다."""
         c = self._book("V. 기판력", "E-6")
         self.assertEqual(c["role"], "composite")
         self.assertEqual(c["section_points"], 4)
