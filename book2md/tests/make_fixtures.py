@@ -1,0 +1,229 @@
+"""검증용 PDF 픽스처 생성기.
+
+실물 교재를 대신해, 지침이 서술한 조판을 그대로 재현한 PDF 를 만든다.
+  기본서: 1단 / 하단 각주 + 가로선 / 우측 여백 sE-8 / 청색 강조 / ☑ 박스 /
+          위첨자 각주 참조 / 사건번호 별표 / 두문자 / 한자
+  사례집: 문제 지문 박스 / 배점 / 학판검 / 두문자(한 글자 다름 — 교차검증용)
+
+지침 §2.2 의 실측 사례(기본서 [확객시전] vs 사례집 [확객시젠])를 일부러 넣어
+§5.3 교차검증이 실제로 잡아내는지 확인한다.
+
+    python3 tests/make_fixtures.py [출력디렉토리]
+"""
+from __future__ import annotations
+
+import sys
+from pathlib import Path
+
+import pymupdf
+
+FONT = "/usr/share/fonts/truetype/wqy/wqy-zenhei.ttc"
+SYMBOL_FONT = "/usr/share/fonts/opentype/unifont/unifont_jp.otf"   # ☑ 글리프용
+BLACK = (0, 0, 0)
+BLUE = (0.12, 0.31, 0.63)        # 강조색 1종 (청색 계열)
+
+BODY = 10.0
+SMALL = 8.0
+SUP = 6.5
+
+
+class Sheet:
+    """한 쪽을 위에서 아래로 채운다."""
+
+    def __init__(self, doc, width=595, height=842, margin=60):
+        self.page = doc.new_page(width=width, height=height)
+        self.w, self.h, self.m = width, height, margin
+        self.y = margin + 20
+        self.page.insert_font(fontname="wqy", fontfile=FONT)
+        self.page.insert_font(fontname="sym", fontfile=SYMBOL_FONT)
+
+    def put(self, text, size=BODY, color=BLACK, x=None, dy=None, bold=False):
+        x = self.m if x is None else x
+        self.y += dy if dy is not None else size * 1.6
+        self.page.insert_text((x, self.y), text, fontname="wqy", fontsize=size,
+                              color=color, render_mode=2 if bold else 0,
+                              border_width=0.35 if bold else 0)
+        return self.y
+
+    def put_runs(self, runs, size=BODY, x=None, dy=None):
+        """[(글자, 색, 굵게), ...] 를 한 줄에 이어 붙인다."""
+        x = self.m if x is None else x
+        self.y += dy if dy is not None else size * 1.6
+        cursor = x
+        for text, color, bold in runs:
+            self.page.insert_text((cursor, self.y), text, fontname="wqy",
+                                  fontsize=size, color=color,
+                                  render_mode=2 if bold else 0,
+                                  border_width=0.35 if bold else 0)
+            cursor += _width(text, size)
+        return self.y
+
+    def put_sup(self, base_runs, sup_text, size=BODY):
+        """본문 끝에 위첨자 각주 번호를 올린다."""
+        y = self.put_runs(base_runs, size=size)
+        cursor = self.m + sum(_width(t, size) for t, _, _ in base_runs)
+        self.page.insert_text((cursor, y - size * 0.35), sup_text, fontname="wqy",
+                              fontsize=SUP, color=BLACK)
+
+    def put_symbol(self, symbol, text, size=BODY):
+        """☑ 처럼 본문 글꼴에 없는 기호는 다른 글꼴로 찍는다 (실제 교재와 같은 상황)."""
+        self.y += size * 1.6
+        self.page.insert_text((self.m, self.y), symbol, fontname="sym", fontsize=size)
+        self.page.insert_text((self.m + size * 1.3, self.y), text, fontname="wqy",
+                              fontsize=size, render_mode=2, border_width=0.35)
+        return self.y
+
+    def sidenote(self, text):
+        """우측 여백의 강의교안 옆번호 (§4.3)."""
+        self.page.insert_text((self.w - self.m - 26, self.y), text,
+                              fontname="wqy", fontsize=SMALL, color=BLACK)
+
+    def box(self, top, bottom):
+        self.page.draw_rect(pymupdf.Rect(self.m - 6, top, self.w - self.m + 6, bottom),
+                            color=(0.4, 0.4, 0.4), width=0.6)
+
+    def footnotes(self, items):
+        """페이지 하단: 가로 구분선 + 작은 글자 각주."""
+        y = self.h - self.m - len(items) * (SMALL * 1.5) - 14
+        self.page.draw_line(pymupdf.Point(self.m, y), pymupdf.Point(self.m + 170, y),
+                            color=BLACK, width=0.7)
+        y += 12
+        for text in items:
+            self.page.insert_text((self.m, y), text, fontname="wqy",
+                                  fontsize=SMALL, color=BLACK)
+            y += SMALL * 1.5
+
+    def header(self, text):
+        self.page.insert_text((self.m, self.m * 0.55), text, fontname="wqy",
+                              fontsize=SMALL, color=(0.4, 0.4, 0.4))
+
+
+def _width(text, size):
+    font = pymupdf.Font(fontfile=FONT)
+    return font.text_length(text, size)
+
+
+# ── 기본서 ──────────────────────────────────────────────────────
+def textbook(path: Path, filler_pages: int = 6):
+    doc = pymupdf.open()
+
+    s = Sheet(doc)
+    s.header("제3편 제1심의 소송절차")
+    s.put("제3편 소송의 개시", size=15, bold=True)
+    s.put("CHAPTER 05 소송물", size=13, bold=True)
+    s.put("제2절 소송물의 특정", size=11.5, bold=True)
+    s.put("1. 소송물 개념", size=11, bold=True)
+    s.put("소송물이란 심판의 대상이 되는 사항을 말한다. 甲이 乙에게 청구하는", size=BODY)
+    s.put("권리관계가 그 내용이 된다.", size=BODY)
+    doc_pages = [s]
+
+    s = Sheet(doc)
+    s.header("제3편 제1심의 소송절차")
+    y = s.put("IV. 시효중단 (11)", size=11, bold=True)
+    s.sidenote("sE-8")
+    s.put("의의 - 내용 - 예외 - 효과 + 관련논점", size=SMALL, color=(0.35, 0.35, 0.35))
+    s.put("1. 문제점", size=BODY, bold=True)
+    s.put_sup([("일부청구의 경우 시효중단의 범위가 문제된다. 判例 는 이를", BLACK, False)], "264")
+    s.put("나누어 본다.", size=BODY)
+    s.put("2. 학설", size=BODY, bold=True)
+    s.put("(1) 일부중단설은 소송물의 범위에서만 중단된다고 본다.", size=BODY)
+    s.put("(2) 전부중단설은 채권 전부에 미친다고 본다.", size=BODY)
+    s.put("3. 判例", size=BODY, bold=True)
+    s.put_runs([("(1) 원칙 ", BLACK, False), ("[일나시 나소시]", BLUE, False),
+                (" 로 본다. (74다1557)", BLACK, False)])
+    s.put_runs([("1) [청구확장 취지 명백히 표시] ", BLACK, False),
+                ("확장의 뜻을 밝힌 때", BLUE, False),
+                (" 에는 전부에 미친다. (91다43695*)", BLACK, False)])
+    s.put("2) [실제로 청구 확장] 뒤에 확장한 경우 (2019다223723)", size=BODY)
+    s.put_sup([("3) [청구 일부를 명시적으로 제외] 제외한 부분 (2018다44114)", BLACK, False)], "266")
+    s.put("4. 검토", size=BODY, bold=True)
+    s.put_runs([("", BLACK, False), ("[확객시전]", BLUE, False),
+                (" 이 타당하다. 제 265 조 참조.", BLACK, False)])
+    top = s.y + 6
+    s.put_symbol("☑", "실제로 청구취지 확장하지 않은 부분의 취급")
+    s.put("1. 최고의 효력", size=BODY)
+    s.put("2. 후소로 제기하는 경우 시효중단의 소급효", size=BODY)
+    s.box(top, s.y + 6)
+    s.footnotes([
+        "264 종전 判例 는 요건을 달리 보았으나 최근 判例 는 요건을 추가하였다. 그 경위는",
+        "다음과 같다. 즉 청구취지 확장의 시기를 기준으로 삼는다.",
+        "266 원고는 2011. 4. 26. 손해배상청구의 소를 제기하였고, 1억 원 중 3천만 원을",
+        "먼저 구하였다. 소멸시효는 2014. 4. 26. 완성된다.",
+    ])
+    doc_pages.append(s)
+
+    s = Sheet(doc)
+    s.header("제3편 제1심의 소송절차")
+    s.put("V. 기판력 (15)(20)", size=11, bold=True)
+    s.sidenote("sE-9")
+    s.put("1. 의의", size=BODY, bold=True)
+    s.put_runs([("확정판결의 ", BLACK, False), ("판단내용의 구속력", BLUE, False),
+                (" 을 말한다. (2018다44114)", BLACK, False)])
+    s.put("2. 判例", size=BODY, bold=True)
+    s.put_sup([("(1) ", BLACK, False), ("[종확나시]", BLUE, False),
+               (" 로 정리된다. (91다43695)", BLACK, False)], "268")
+    s.footnotes(["268 기판력의 표준시에 관하여는 뒤에서 본다."])
+    doc_pages.append(s)
+
+    for k in range(filler_pages):
+        s = Sheet(doc)
+        s.header("제3편 제1심의 소송절차")
+        s.put(f"{k + 3}. 관련 논점 {k + 1}", size=BODY, bold=True)
+        for j in range(14):
+            s.put(f"본문 {k + 1}-{j + 1}. 소송물의 범위에 관하여 甲과 乙 사이의 "
+                  f"법률관계를 본다.", size=BODY)
+        doc_pages.append(s)
+
+    doc.save(str(path))
+    doc.close()
+
+
+# ── 사례집 ──────────────────────────────────────────────────────
+def casebook(path: Path):
+    doc = pymupdf.open()
+
+    s = Sheet(doc)
+    s.header("사례집 E. 소송물")
+    s.put("E-5. [일부청구-시효중단]", size=13, bold=True)
+    s.put("문제 (10점)", size=11, bold=True)
+    top = s.y + 6
+    s.put("불법행위로 피해를 입은 소비자들은 X를 상대로 손해배상청구의 소를", size=BODY)
+    s.put("제기하면서 소장에 앞으로의 신체감정결과에 따라 청구금액을 확장할", size=BODY)
+    s.put("뜻을 명시한 후, 전체 손해액 중 일부인 1억 원에 대해서 지급을 구한다고", size=BODY)
+    s.put("기재하였다. 2011. 4. 26. 소를 제기하였다.", size=BODY)
+    s.box(top, s.y + 6)
+    s.put("답안", size=11, bold=True)
+    s.put("1. 문제의 소재 — 일부청구 의의 (0.5)", size=BODY, bold=True)
+    s.put("일부청구의 의의를 먼저 본다.", size=BODY)
+    s.put("2. 일부청구 소송물 (2.5)", size=BODY, bold=True)
+    s.put("(1) 학설", size=BODY)
+    s.put_runs([("(2) 判例 ", BLACK, False), ("[일외별명일]", BLUE, False),
+                (" (74다1557)", BLACK, False)])
+    s.put("(3) 검토 및 사안", size=BODY)
+    doc_pages = [s]
+
+    s = Sheet(doc)
+    s.header("사례집 E. 소송물")
+    s.put("3. 일부청구시 시효중단 범위 (4)", size=BODY, bold=True)
+    s.put("(1) [제265조]", size=BODY)
+    s.put("(2) 학설", size=BODY)
+    # 지침 §2.2 실측 사례: 사례집 쪽이 '확객시젠' 으로 한 글자 다르다
+    s.put_runs([("(3) 判例 ", BLACK, False),
+                ("[일나시 나소시] [확객시젠] [종확나시]", BLUE, False),
+                (" (91다43695)", BLACK, False)])
+    s.put("(4) 검토 및 사안", size=BODY)
+    s.put("4. 사안해결 (0.5)", size=BODY, bold=True)
+    s.put("사안에서는 청구취지 확장의 뜻을 명시하였으므로 전부에 미친다.", size=BODY)
+    doc_pages.append(s)
+
+    doc.save(str(path))
+    doc.close()
+
+
+if __name__ == "__main__":
+    out = Path(sys.argv[1] if len(sys.argv) > 1 else "tests/fixtures")
+    out.mkdir(parents=True, exist_ok=True)
+    textbook(out / "기본서.pdf")
+    casebook(out / "사례집.pdf")
+    for p in sorted(out.glob("*.pdf")):
+        print(f"{p}  {p.stat().st_size:,} bytes")
