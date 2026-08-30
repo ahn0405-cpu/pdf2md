@@ -1182,6 +1182,14 @@ chapter: "E"
 parser: pymupdf
 ---
 
+## B-10. [변론관할] `4점`
+
+### 1. 문제의 소재 `1`
+
+### 2. 변론관할 성립 여부 `3`
+
+관할위반의 항변 없이 본안에 관하여 변론하였다.
+
 ## E-2. 」명시적 일부청구, 중복소제기] `14점`
 
 ### 1. 문제의 소재 `1`
@@ -1223,6 +1231,44 @@ parser: pymupdf
 ### 4. 사안해결 `1`
 """
 
+    #: 사례집 앞머리 목차 쪽. 점선과 쪽수가 붙고 다음 문제까지 한 줄에 이어진다.
+    TOC = """---
+source: 사례집
+chapter: "목차"
+parser: pymupdf
+---
+
+## E-5. 일부청구-시효중단 ..............................112E-6. 일부청구-기판력 ......119
+"""
+
+    #: 다른 장 — 두문자 하나만 겹친다. 근거 하나뿐이라 후보로만 가야 한다.
+    OTHER = """---
+source: 기본서
+chapter: "070 상소이익"
+parser: pymupdf
+---
+
+#### III. 판단기준
+
+(1) 判例 ==`[일외별명일]`== 참조.
+"""
+
+    #: 실물 기본서의 전형 — 절 제목이 정형뿐이라 논점 이름이 장에만 있다
+    PLAIN = """---
+source: 기본서
+chapter: "021 변론관할"
+parser: pymupdf
+---
+
+#### I. 의의
+
+관할위반의 항변 없이 본안변론을 하면 생긴다.
+
+#### II. 요건
+
+제1심 법원일 것.
+"""
+
     @classmethod
     def setUpClass(cls):
         cls.tmp = Path(tempfile.mkdtemp())
@@ -1230,8 +1276,13 @@ parser: pymupdf
         (cls.tmp / "사례집").mkdir()
         (cls.tmp / "기본서" / "45_046일부청구.md").write_text(
             cls.TEXTBOOK, encoding="utf-8")
+        (cls.tmp / "기본서" / "70_070상소이익.md").write_text(
+            cls.OTHER, encoding="utf-8")
+        (cls.tmp / "기본서" / "21_021변론관할.md").write_text(
+            cls.PLAIN, encoding="utf-8")
         (cls.tmp / "사례집" / "E_명시적일부청구중복소제기.md").write_text(
             cls.CASEBOOK, encoding="utf-8")
+        (cls.tmp / "사례집" / "00_목차.md").write_text(cls.TOC, encoding="utf-8")
         from book2md import mapping as M
         cls.M = M
         cls.data = M.build([cls.tmp], CFG)
@@ -1266,7 +1317,7 @@ parser: pymupdf
         """실측: '## E-2. 」명시적 일부청구, 중복소제기]' (지침 §근거1)"""
         ids = {p.id: p.title for p in self.data["problems"]}
         self.assertEqual(ids["E-2"], "명시적 일부청구, 중복소제기")
-        self.assertEqual({"E-2", "E-5", "E-6"}, set(ids))
+        self.assertEqual({"B-10", "E-2", "E-5", "E-6"}, set(ids))
 
     def test_절마다_사건번호를_따로_센다(self):
         """프론트매터의 cases 는 파일 전체 것이라 절 대조에 못 쓴다."""
@@ -1289,20 +1340,72 @@ parser: pymupdf
     def test_근거가_하나뿐이면_후보로만_둔다(self):
         """score 1 은 mappings 에 올리지 않는다 (지침 §점수와 처리).
 
-        II. 소송물은 두문자 하나만 겹친다. 제목 키워드도 사건번호도 없다.
+        '070 상소이익 > III. 판단기준' 은 두문자 하나만 겹친다. 장 이름도 절
+        이름도 사례집 키워드와 안 맞고 사건번호도 없다.
         """
         secs = [r["textbook"]["section"] for r in self.doc["candidates"]]
-        self.assertIn("II. 소송물", secs)
-        self.assertEqual(self._row("II. 소송물")["score"], 1)
-        self.assertNotIn("II. 소송물",
+        self.assertIn("III. 판단기준", secs)
+        self.assertEqual(self._row("III. 판단기준")["score"], 1)
+        self.assertNotIn("III. 판단기준",
                          [r["textbook"]["section"] for r in self.doc["mappings"]])
+
+    def test_목차_쪽에서_온_가짜_문제는_버린다(self):
+        """실측: 'D-20. 증서진부확인의 쇠 ......233D-21. 장래이행의 쇠....237'
+
+        같은 번호가 두 번 실리면 진짜 문제의 사건번호·두문자가 목차 쪽 빈
+        껍데기에 가려진다.
+        """
+        self.assertEqual([p.id for p in self.data["dropped"]], ["E-5"])
+        real = [p for p in self.data["problems"] if p.id == "E-5"]
+        self.assertEqual(len(real), 1)
+        self.assertEqual(len(real[0].answers), 4)
+        self.assertIn("dropped_toc_rows", self.path.read_text(encoding="utf-8"))
+
+    def test_장만_맞으면_절은_사람이_고르게_남긴다(self):
+        """'021 변론관할' 의 절은 'I. 의의 / II. 요건' 뿐이라 고를 수가 없다.
+
+        절을 못 고른다고 버리면 B-10 은 어디에도 안 붙는다. 장까지는 확실하니
+        절 후보를 적어 사람에게 넘긴다.
+        """
+        chaps = self.doc.get("chapter_mappings") or []
+        rows = {(c["textbook"]["chapter"], c["casebook"][0]["id"]): c
+                for c in chaps}
+        row = rows.get(("021 변론관할", "B-10"))
+        self.assertIsNotNone(row, f"있어야 한다. 지금: {sorted(rows)}")
+        self.assertIsNone(row["textbook"]["section"])
+        self.assertEqual(row["textbook"]["sections"], ["I. 의의", "II. 요건"])
+        self.assertEqual(row["evidence"]["chapter_keyword"], ["변론관할"])
+        self.assertFalse(row["confirmed"])
+
+    def test_절을_안_고르고_승인하면_FAIL(self):
+        doc = {"chapter_mappings": [{"confirmed": True,
+                                     "textbook": {"chapter": "021 변론관할",
+                                                  "section": None}}]}
+        fails, _ = self.M.validate(doc)
+        self.assertTrue(any("절을 안 고르고" in f for f in fails))
+
+    def test_장까지_붙었으면_짝이_없는_것이_아니다(self):
+        self.assertNotIn("B-10", self.doc["unmapped"]["casebook_problems"])
+
+    def test_장_제목도_제목_키워드로_본다(self):
+        """실물 절 제목은 'I. 의의 / II. 내용' 처럼 정형이라 논점 이름이 없다.
+
+        논점 이름은 장 제목에 있다. II. 소송물은 절 이름으로는 안 맞지만
+        장 '046 일부청구' 가 E-2 의 키워드 '명시적 일부청구' 와 맞는다.
+        """
+        row = self._row("II. 소송물")
+        self.assertEqual(row["evidence"]["title_keyword"], [])
+        self.assertIn("명시적 일부청구", row["evidence"]["chapter_keyword"])
+        self.assertEqual(row["score"], 2)
 
     def test_폴더_이름이_아니라_프론트매터로_가른다(self):
         """폴더 이름은 사장님이 정하는 것이라 믿을 수 없다. source: 는 우리가 적었다."""
         f = self.data["files"]
-        self.assertEqual([p.name for p in f["textbook"]], ["45_046일부청구.md"])
+        self.assertEqual([p.name for p in f["textbook"]],
+                         ["21_021변론관할.md", "45_046일부청구.md",
+                          "70_070상소이익.md"])
         self.assertEqual([p.name for p in f["casebook"]],
-                         ["E_명시적일부청구중복소제기.md"])
+                         ["00_목차.md", "E_명시적일부청구중복소제기.md"])
         self.assertEqual(f["other"], [])
 
     def test_짝이_없는_절은_unmapped_에_남긴다(self):
@@ -1411,7 +1514,7 @@ parser: pymupdf
         out = self.M.review(self.doc)
         self.assertIn("[ ] 046 일부청구 > IV. 시효중단", out)
         self.assertIn("E-5(10점, primary)", out)
-        self.assertIn("[!] 046 일부청구 > II. 소송물", out)
+        self.assertIn("[!] 070 상소이익 > III. 판단기준", out)
         self.assertIn("⚠️ 근거", out)
 
 

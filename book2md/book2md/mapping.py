@@ -30,6 +30,10 @@ _POINTS = re.compile(r"^\(?\s*(\d+(?:\.\d+)?)\s*\)?\s*점?$")
 _BRACKET = re.compile(r"[\[［｛{〔【「『」』｝】〕］\]]")
 _ROMAN_LEAD = re.compile(r"^\s*(?:[ⅠⅡⅢⅣⅤⅥⅦⅧⅨⅩ]|[IVX]{1,5}|\d{1,3})\s*[.,·•‧∙・)]\s*")
 _MARKUP = re.compile(r"(?:==|\*\*|`)")
+#: 장 제목 앞 일련번호. '046 일부청구' → '일부청구'
+_CHAP_NUM = re.compile(r"^\s*\d{1,4}[.\s]\s*")
+#: 사례집 목차 쪽. 제목에 점선과 쪽수가 붙는다
+_TOC_DOTS = re.compile(r"\.{4,}|…{2,}")
 
 
 def _plain(text: str) -> str:
@@ -69,6 +73,15 @@ class Section:
         """번호를 뗀 알맹이. 'IV. 시효중단' → '시효중단'"""
         return _ROMAN_LEAD.sub("", self.title).strip()
 
+    @property
+    def chapter_name(self) -> str:
+        """번호를 뗀 장 이름. '046 일부청구' → '일부청구'
+
+        실물 기본서의 절 제목은 'I. 의의 / II. 내용 / III. 효과' 처럼 정형이라
+        논점 이름을 담지 않는다. 논점 이름은 장 제목에 있다.
+        """
+        return _CHAP_NUM.sub("", self.chapter).strip()
+
 
 @dataclass
 class Answer:
@@ -90,6 +103,15 @@ class Problem:
     answers: list = field(default_factory=list)
     cases: set = field(default_factory=set)
     mnemonics: set = field(default_factory=set)
+
+    @property
+    def looks_like_toc(self) -> bool:
+        """사례집 앞머리의 목차 쪽에서 온 가짜 문제인가.
+
+        목차 줄은 제목 뒤에 점선과 쪽수가 붙고 다음 문제까지 한 줄에 이어진다.
+        실측: 'D-20. 증서진부확인의 쇠 ......233D-21. 장래이행의 쇠....237'
+        """
+        return bool(_TOC_DOTS.search(self.title)) or len(self.title) > 120
 
     @property
     def points_sum(self) -> float | None:
@@ -233,17 +255,26 @@ def read_casebook(files, pat: Patterns) -> list[Problem]:
 
 
 # ── 근거 ────────────────────────────────────────────────────────
-def _kw_hit(section: Section, prob: Problem) -> list[str]:
-    """제목 키워드가 겹치는가. 부분 일치도 인정한다 (지침 §근거1)."""
-    name = re.sub(r"\s+", "", section.name)
-    if len(name) < 2:
+def _hits(name: str, prob: Problem) -> list[str]:
+    flat_name = re.sub(r"\s+", "", name)
+    if len(flat_name) < 2:
         return []
-    hits = []
+    out = []
     for kw in prob.keywords:
         flat = re.sub(r"\s+", "", kw)
-        if len(flat) >= 2 and (name in flat or flat in name):
-            hits.append(kw)
-    return hits
+        if len(flat) >= 2 and (flat_name in flat or flat in flat_name):
+            out.append(kw)
+    return out
+
+
+def _chap_hit(section: Section, prob: Problem) -> list[str]:
+    """장 제목이 겹치는가. 절 제목이 정형이라 여기에 논점 이름이 있다."""
+    return _hits(section.chapter_name, prob)
+
+
+def _kw_hit(section: Section, prob: Problem) -> list[str]:
+    """제목 키워드가 겹치는가. 부분 일치도 인정한다 (지침 §근거1)."""
+    return _hits(section.name, prob)
 
 
 def _mn_hit(section: Section, prob: Problem) -> tuple[list[str], list[str]]:
@@ -287,6 +318,7 @@ class Match:
     section: Section
     prob: Problem
     keywords: list
+    chapter: list
     cases: list
     mnemonics: list
     near: list
@@ -295,8 +327,37 @@ class Match:
 
     @property
     def score(self) -> int:
-        return sum(bool(x) for x in
-                   (self.keywords, self.cases, self.mnemonics or self.near))
+        """지침 §점수와 처리 그대로 0~3. 근거 1 은 장·절 어느 쪽이든 성립한다."""
+        return sum(bool(x) for x in (self.keywords or self.chapter,
+                                     self.cases,
+                                     self.mnemonics or self.near))
+
+    @property
+    def strength(self) -> tuple:
+        """같은 score 안에서 무엇을 먼저 볼지.
+
+        실물에서는 사건번호·두문자가 희박해 score 1 이 1200쌍 넘게 나온다.
+        점수를 부풀리는 대신 사람이 위에서부터 훑을 수 있게 줄을 세운다.
+        긴 키워드가 맞은 쪽이 우연일 확률이 낮다.
+        """
+        kw_len = sum(len(re.sub(r"\s+", "", k)) for k in self.keywords)
+        ch_len = sum(len(re.sub(r"\s+", "", k)) for k in self.chapter)
+        return (self.score, len(self.cases), len(self.mnemonics),
+                kw_len, ch_len, len(self.near))
+
+
+@dataclass
+class ChapterMatch:
+    """장 이름만 맞고 절은 못 고른 것. 절은 사람이 고른다."""
+    chapter: str
+    file: str
+    sections: list
+    prob: Problem
+    keywords: list
+
+    @property
+    def score(self) -> int:
+        return 1
 
 
 def build(roots, cfg: dict) -> dict:
@@ -308,23 +369,41 @@ def build(roots, cfg: dict) -> dict:
     sections = read_textbook(tb_files, pat)
     problems = read_casebook(cb_files, pat)
 
+    dropped = [p for p in problems if p.looks_like_toc]
+    problems = [p for p in problems if not p.looks_like_toc]
+
     by_section: dict[int, list[Match]] = {}
     used: set = set()
+    # 장 이름이 맞은 (장, 문제) — 절까지 고른 것은 뒤에서 뺀다
+    chap_hits: dict = {}
     for i, sec in enumerate(sections):
         for prob in problems:
+            ck = _chap_hit(sec, prob)
+            if ck:
+                key = (sec.chapter, sec.file, prob.id)
+                chap_hits.setdefault(key, [prob, ck, []])[2].append(sec.title)
             kw = _kw_hit(sec, prob)
             cs = sorted(sec.cases & prob.cases)
             mn, near = _mn_hit(sec, prob)
             if not (kw or cs or mn or near):
                 continue
             role, pts = _role(sec, prob)
-            m = Match(sec, prob, kw, cs, mn, near, role, pts)
-            if m.score >= 1:
-                by_section.setdefault(i, []).append(m)
-                if m.score >= 2:
-                    used.add(prob.id)
-    return {"sections": sections, "problems": problems,
-            "matches": by_section, "used": used,
+            m = Match(sec, prob, kw, ck, cs, mn, near, role, pts)
+            by_section.setdefault(i, []).append(m)
+            if m.score >= 2:
+                used.add(prob.id)
+
+    placed = {(m.section.chapter, m.section.file, m.prob.id)
+              for ms in by_section.values() for m in ms}
+    chapters = [ChapterMatch(chapter=ch, file=f, sections=secs,
+                             prob=prob, keywords=ck)
+                for (ch, f, pid), (prob, ck, secs) in sorted(chap_hits.items())
+                if (ch, f, pid) not in placed]
+    for c in chapters:
+        used.add(c.prob.id)
+
+    return {"sections": sections, "problems": problems, "dropped": dropped,
+            "matches": by_section, "chapters": chapters, "used": used,
             "files": {"textbook": tb_files, "casebook": cb_files, "other": other}}
 
 
@@ -356,7 +435,8 @@ def to_yaml(data: dict) -> str:
 
     def emit(items, indent="  "):
         for sec, ms in items:
-            ms = sorted(ms, key=lambda m: (-m.score, m.prob.id))
+            ms = sorted(ms, key=lambda m: (tuple(-x for x in m.strength),
+                                           m.prob.id))
             L.append(f"{indent}- textbook:")
             L.append(f"{indent}    chapter: {_q(sec.chapter)}")
             L.append(f"{indent}    section: {_q(sec.title)}")
@@ -373,12 +453,14 @@ def to_yaml(data: dict) -> str:
                          f"{m.prob.points_sum if m.prob.points_sum is not None else 'null'}")
                 L.append(f"{indent}      file: {_q(m.prob.file)}")
                 L.append(f"{indent}      role: {m.role}")
+            chs = sorted({k for m in ms for k in m.chapter})
             kws = sorted({k for m in ms for k in m.keywords})
             cs = sorted({c for m in ms for c in m.cases})
             mn = sorted({x for m in ms for x in m.mnemonics})
             nr = sorted({x for m in ms for x in m.near})
             L.append(f"{indent}  evidence:")
             L.append(f"{indent}    title_keyword: [" + ", ".join(_q(k) for k in kws) + "]")
+            L.append(f"{indent}    chapter_keyword: [" + ", ".join(_q(k) for k in chs) + "]")
             L.append(f"{indent}    shared_cases: [" + ", ".join(_q(c) for c in cs) + "]")
             L.append(f"{indent}    shared_mnemonics: [" + ", ".join(_q(x) for x in mn) + "]")
             if nr:
@@ -402,6 +484,41 @@ def to_yaml(data: dict) -> str:
     else:
         L.append("  []")
     L.append("")
+    L.append("# 장 이름만 맞고 절은 못 골랐다. 실물 기본서의 절 제목은")
+    L.append("# 'I. 의의 / II. 내용 / III. 효과' 처럼 정형이라 논점 이름이 없다.")
+    L.append("# 어느 절인지는 사람이 고를 것 — sections 에 후보를 적어 두었다.")
+    L.append("chapter_mappings:")
+    if data.get("chapters"):
+        for c in sorted(data["chapters"], key=lambda c: (c.chapter, c.prob.id)):
+            L.append("  - textbook:")
+            L.append(f"      chapter: {_q(c.chapter)}")
+            L.append(f"      section: null      # ← 아래 sections 에서 고를 것")
+            L.append(f"      file: {_q(c.file)}")
+            L.append("      sections: [" + ", ".join(_q(x) for x in c.sections) + "]")
+            L.append("    casebook:")
+            L.append(f"      - id: {_q(c.prob.id)}")
+            L.append(f"        title: {_q(c.prob.title)}")
+            L.append(f"        points: "
+                     f"{c.prob.points if c.prob.points is not None else 'null'}")
+            L.append(f"        points_sum: "
+                     f"{c.prob.points_sum if c.prob.points_sum is not None else 'null'}")
+            L.append(f"        file: {_q(c.prob.file)}")
+            L.append("        role: composite")
+            L.append("    evidence:")
+            L.append("      chapter_keyword: ["
+                     + ", ".join(_q(k) for k in c.keywords) + "]")
+            L.append("    score: 1")
+            L.append("    confirmed: false")
+    else:
+        L.append("  []")
+    L.append("")
+    if data.get("dropped"):
+        L.append("# 사례집 목차 쪽에서 온 가짜 문제 — 버렸다")
+        L.append("# (제목에 점선과 쪽수가 붙어 다음 문제까지 한 줄에 이어진 것)")
+        L.append("dropped_toc_rows:")
+        for p in data["dropped"]:
+            L.append(f"  - {_q(p.id)}")
+        L.append("")
     L.append("# 짝을 못 찾은 것들")
     L.append("unmapped:")
     lone = [s for i, s in enumerate(sections) if not matches.get(i)]
@@ -431,8 +548,10 @@ def review(doc: dict) -> str:
     L = ["# 승인 대기 목록", ""]
     rows = doc.get("mappings") or []
     waiting = [m for m in rows if not m.get("confirmed")]
+    chaps = doc.get("chapter_mappings") or []
     L.append(f"매핑 {len(rows)}건 · 승인 대기 {len(waiting)}건 · "
-             f"후보 {len(doc.get('candidates') or [])}건")
+             f"후보 {len(doc.get('candidates') or [])}건 · "
+             f"장 단위 {len(chaps)}건")
     L.append("")
     for m in rows:
         tb = m.get("textbook", {})
@@ -452,6 +571,17 @@ def review(doc: dict) -> str:
         L.append(f"    근거: {_evidence(m)}  [score {m.get('score')}]")
         L.append("    ⚠️ 근거 하나뿐 — 후보로만 두었다")
         L.append("")
+    if chaps:
+        L.append("## 장 이름만 맞은 것 — 절은 사람이 고를 것")
+        L.append("")
+    for m in chaps:
+        tb = m.get("textbook", {})
+        books = ", ".join(str(c.get("id")) for c in (m.get("casebook") or []))
+        L.append(f"[~] {tb.get('chapter','')} > (절 미정)  ← {books}")
+        L.append(f"    근거: {_evidence(m)}")
+        secs = tb.get("sections") or []
+        L.append("    절 후보: " + (" | ".join(str(x) for x in secs) or "없음"))
+        L.append("")
     un = doc.get("unmapped") or {}
     L.append(f"짝 없음: 기본서 절 {len(un.get('textbook_sections') or [])}개 · "
              f"사례집 문제 {len(un.get('casebook_problems') or [])}개")
@@ -465,9 +595,17 @@ def _pt(v) -> str:
 def _evidence(m: dict) -> str:
     e = m.get("evidence") or {}
     kw = e.get("title_keyword") or []
-    parts = [f"제목키워드 {', '.join(_q(k) for k in kw)}" if kw else "제목키워드 없음",
-             f"사건번호 {len(e.get('shared_cases') or [])}건",
-             f"두문자 {len(e.get('shared_mnemonics') or [])}건"]
+    ch = e.get("chapter_keyword") or []
+    parts = []
+    if kw:
+        parts.append(f"절 제목 {', '.join(_q(k) for k in kw)}")
+    if ch:
+        parts.append(f"장 제목 {', '.join(_q(k) for k in ch)}")
+    if not kw and not ch:
+        parts.append("제목키워드 없음")
+    if "shared_cases" in e or "shared_mnemonics" in e:
+        parts.append(f"사건번호 {len(e.get('shared_cases') or [])}건")
+        parts.append(f"두문자 {len(e.get('shared_mnemonics') or [])}건")
     near = e.get("near_mnemonics") or []
     if near:
         parts.append(f"근접 두문자 {len(near)}건")
@@ -512,6 +650,13 @@ def validate(doc: dict) -> tuple[list, list]:
         if len(roles) > 1 and any(r != "composite" for r in roles):
             warns.append(f"M3 문제 {pid} 가 {len(roles)}곳에 쓰였다 "
                          f"(role: {', '.join(str(r) for r in roles)})")
+    for m in (doc.get("chapter_mappings") or []):
+        tb = m.get("textbook") or {}
+        if m.get("confirmed") and not tb.get("section"):
+            fails.append(f"M2 장 {tb.get('chapter')} 의 절을 안 고르고 승인했다 "
+                         f"— sections 에서 하나를 골라 적을 것")
+        if m.get("confirmed") and tb.get("file") and not Path(tb["file"]).exists():
+            fails.append(f"M2 파일이 없다: {tb['file']}")
     left = (doc.get("unmapped") or {}).get("casebook_problems") or []
     if left:
         warns.append(f"M1 어디에도 안 붙은 사례집 문제 {len(left)}개: "
@@ -560,16 +705,23 @@ def debug_report(data: dict, sample: int = 40) -> str:
 
     # 근거 조합
     L += ["## 어느 근거가 걸렸나", "",
-          "| 제목키워드 | 사건번호 | 두문자 | 쌍 |", "|---|---|---|---:|"]
+          "| 절 제목 | 장 제목 | 사건번호 | 두문자 | 쌍 |",
+          "|---|---|---|---|---:|"]
     combo: dict = {}
     for m in flat:
-        key = (bool(m.keywords), bool(m.cases), bool(m.mnemonics or m.near))
+        key = (bool(m.keywords), bool(m.chapter), bool(m.cases),
+               bool(m.mnemonics or m.near))
         combo[key] = combo.get(key, 0) + 1
     for key in sorted(combo, key=lambda k: -combo[k]):
         L.append("| " + " | ".join("○" if x else "·" for x in key)
                  + f" | {combo[key]} |")
     L.append("")
-    L.append(f"제목키워드가 걸린 쌍 {sum(1 for m in flat if m.keywords)} · "
+    L.append(f"장 이름만 맞아 절을 못 고른 (장, 문제) "
+             f"{len(data.get('chapters') or [])}건 · "
+             f"목차 쪽에서 온 가짜 문제 {len(data.get('dropped') or [])}건 버림")
+    L.append("")
+    L.append(f"절 제목이 걸린 쌍 {sum(1 for m in flat if m.keywords)} · "
+             f"장 제목 {sum(1 for m in flat if m.chapter)} · "
              f"사건번호 {sum(1 for m in flat if m.cases)} · "
              f"두문자 {sum(1 for m in flat if m.mnemonics)} · "
              f"근접 두문자 {sum(1 for m in flat if m.near and not m.mnemonics)}")
@@ -586,18 +738,54 @@ def debug_report(data: dict, sample: int = 40) -> str:
     L.append("")
 
     # 표본
+    with_pt = sum(1 for p in problems if p.points is not None)
+    ans_pt = sum(1 for p in problems for a in p.answers if a.points is not None)
+    ans_all = sum(len(p.answers) for p in problems)
+    L += ["## 배점을 읽었나", "",
+          f"- 총점을 읽은 문제 {with_pt}/{len(problems)}개",
+          f"- 배점을 읽은 답안 항목 {ans_pt}/{ans_all}개",
+          "",
+          "둘 다 0 이면 백틱 표시(`` `10점` ``)가 아예 없다는 뜻이다. "
+          "아래 「제목 원문」을 볼 것.", ""]
+
+    # 제목이 실제로 어떻게 생겼는지 — 짐작하지 않기 위해
+    L += ["## 제목 원문 (사례집 첫 파일)", "", "```"]
+    cb = data["files"]["casebook"]
+    if cb:
+        L.append(f"# {cb[0]}")
+        n = 0
+        for line in Path(cb[0]).read_text(encoding="utf-8").splitlines():
+            if _HEAD.match(line):
+                L.append(line)
+                n += 1
+                if n >= sample:
+                    break
+    L += ["```", ""]
+
     L += [f"## 사례집 문제 표본 (앞 {sample}개)", "",
-          "| id | 제목 | 쪼갠 키워드 | 총점 | 답안 | 사건 | 두문자 |",
-          "|---|---|---|---:|---:|---:|---:|"]
+          "| id | 제목 | 쪼갠 키워드 | 총점 | 답안 | 배점읽음 | 사건 | 두문자 |",
+          "|---|---|---|---:|---:|---:|---:|---:|"]
     for p in problems[:sample]:
+        got = sum(1 for a in p.answers if a.points is not None)
         L.append(f"| `{p.id}` | {p.title} | {' / '.join(p.keywords)} "
                  f"| {p.points if p.points is not None else '—'} "
-                 f"| {len(p.answers)} | {len(p.cases)} | {len(p.mnemonics)} |")
+                 f"| {len(p.answers)} | {got} | {len(p.cases)} | {len(p.mnemonics)} |")
     L += ["", f"## 기본서 절 표본 (앞 {sample}개)", "",
-          "| 장 | 절 | 알맹이 | 사건 | 두문자 |", "|---|---|---|---:|---:|"]
-    for s in sections[:sample]:
-        L.append(f"| {s.chapter} | {s.title} | {s.name} "
-                 f"| {len(s.cases)} | {len(s.mnemonics)} |")
+          "| 장 | 장 알맹이 | 절 | 절 알맹이 | 사건 | 두문자 |",
+          "|---|---|---|---|---:|---:|"]
+    for sec in sections[:sample]:
+        L.append(f"| {sec.chapter} | {sec.chapter_name} | {sec.title} "
+                 f"| {sec.name} | {len(sec.cases)} | {len(sec.mnemonics)} |")
+    if data.get("chapters"):
+        L += ["", "## 장 이름만 맞은 것 (앞 %d개)" % sample, "",
+              "| 장 | 문제 | 맞은 키워드 | 절 후보 |", "|---|---|---|---|"]
+        for c in data["chapters"][:sample]:
+            L.append(f"| {c.chapter} | `{c.prob.id}` {c.prob.title} "
+                     f"| {' / '.join(c.keywords)} | {' · '.join(c.sections)} |")
+    if data.get("dropped"):
+        L += ["", "## 목차 쪽에서 온 가짜 문제 (버림)", ""]
+        for p in data["dropped"]:
+            L.append(f"- `{p.id}` {p.title[:80]}")
 
     # 짝 없는 문제 — 여기가 제일 중요하다
     left = [p for p in problems if p.id not in data["used"]]
