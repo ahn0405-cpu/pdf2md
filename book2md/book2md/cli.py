@@ -25,7 +25,22 @@ from .pipeline import Pipeline, STAGES
 from .validate import validate as run_validate, reports as validation_reports, load_baseline
 
 
+def _force_utf8() -> None:
+    """콘솔 인코딩 때문에 리포트 출력이 죽지 않게 한다.
+
+    Windows 기본 콘솔은 cp949 라서 리포트의 `☑ ⚠️ ✅` 에서 UnicodeEncodeError 로
+    멈춘다. 파일은 어차피 UTF-8 로 쓰므로, 화면 출력만 UTF-8 로 돌리고
+    그래도 못 찍는 글자는 대체 문자로 흘려보낸다.
+    """
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            stream.reconfigure(encoding="utf-8", errors="replace")
+        except Exception:                      # pragma: no cover - 아주 오래된 파이썬
+            pass
+
+
 def main(argv=None) -> int:
+    _force_utf8()
     ap = argparse.ArgumentParser(
         prog="convert", description="민사소송법 기본서·사례집 PDF → Markdown")
     ap.add_argument("--config", help="config.yaml 경로")
