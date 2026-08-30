@@ -38,6 +38,11 @@ pip install -r requirements.txt          # PyYAML + PyMuPDF
 # 4) 검증만 다시 / 두 소스 교차 검증
 ./convert validate output
 ./convert crosscheck output/기본서 output/사례집
+
+# 진단이 "없다" 고 할 때 — 원문 증거를 그대로 뜬다
+./convert probe 기본서.pdf                    # 괄호·색·도형·옆번호·두문자 후보
+./convert probe 기본서.pdf --find "시효중단"    # 몇 쪽에 있나 (변환할 장 고르기)
+./convert probe 기본서.pdf --page 137          # 그 쪽 span·도형 전부 덤프
 ```
 
 ### Windows

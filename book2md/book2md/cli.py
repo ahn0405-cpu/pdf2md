@@ -74,6 +74,14 @@ def main(argv=None) -> int:
     c.add_argument("dir_b")
     c.add_argument("--labels", default="기본서,사례집")
 
+    pr = sub.add_parser("probe", help="원문 증거 뜨기. 진단이 '없다'고 할 때 확인용.")
+    pr.add_argument("pdf")
+    pr.add_argument("--find", help="이 글자가 몇 쪽에 있는지 (변환할 장 고를 때)")
+    pr.add_argument("--page", type=int, help="이 쪽의 span·도형을 전부 덤프")
+    pr.add_argument("--sample", type=int, default=40, help="훑을 쪽 수 (기본 40)")
+    pr.add_argument("--pages", help="훑을 쪽을 직접 지정. 예: 120-160")
+    pr.add_argument("--out", help="결과를 이 파일로 저장 (기본: 화면)")
+
     sub.add_parser("parsers", help="쓸 수 있는 파서 보기")
 
     args = ap.parse_args(argv)
@@ -271,6 +279,29 @@ def _cmd_crosscheck(args, cfg) -> int:
         print(f"\n두문자 불일치 의심 {mismatches}건. 사람이 판단할 것 (§2.2). "
               f"자동 교정하지 않았다.", file=sys.stderr)
         return 1
+    return 0
+
+
+# ── probe ───────────────────────────────────────────────────────
+def _cmd_probe(args, cfg) -> int:
+    from . import probe as probe_mod
+    pdf = Path(args.pdf)
+    if not pdf.exists():
+        print(f"파일이 없다: {pdf}", file=sys.stderr)
+        return 2
+    if args.find:
+        text = probe_mod.find(str(pdf), args.find)
+    elif args.page:
+        text = probe_mod.page(str(pdf), args.page)
+    else:
+        rng = _page_range(args.pages)
+        text = probe_mod.scan(str(pdf), cfg, args.sample, list(rng) if rng else None)
+    if args.out:
+        Path(args.out).parent.mkdir(parents=True, exist_ok=True)
+        Path(args.out).write_text(text, encoding="utf-8")
+        print(f"→ {args.out}")
+    else:
+        print(text)
     return 0
 
 

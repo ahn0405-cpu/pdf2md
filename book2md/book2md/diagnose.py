@@ -18,7 +18,7 @@ import subprocess
 from collections import Counter
 from dataclasses import dataclass, field, asdict
 
-from .color import Palette, is_black, to_rgb
+from .color import Palette, is_black, to_hex, to_rgb
 from .patterns import Patterns
 
 _HANJA = re.compile(r"[一-鿿豈-﫿]")
@@ -69,6 +69,7 @@ def run(pdf_path: str, cfg: dict, sample: int = 24, layout_pages: int = 3,
     problems: Counter = Counter()
     bonus = 0
     sizes: Counter = Counter()
+    draw_colors: Counter = Counter()
 
     for i in scan:
         page = doc[i]
@@ -95,6 +96,18 @@ def run(pdf_path: str, cfg: dict, sample: int = 24, layout_pages: int = 3,
         for m in _EXAM.finditer(text):
             exam_years[m.group(1)] += 1
         bonus += len(_CHECK.findall(text))
+        # 색이 글자에 없으면 형광펜(칠한 네모)일 수 있다. 도형도 함께 본다.
+        # get_drawings 는 무거워서 앞쪽 표본 몇 쪽만 본다.
+        if len(draw_colors) < 40 and scan.index(i) < 8:
+            for dr in page.get_drawings():
+                for key in ("fill", "color"):
+                    col = dr.get(key)
+                    if not col:
+                        continue
+                    rgb = tuple(int(round(c * 255)) for c in col[:3])
+                    if rgb == (255, 255, 255) or is_black(rgb, color_cfg):
+                        continue
+                    draw_colors[to_hex(rgb)] += 1
         for m in _PROBLEM.finditer(text):
             problems[f"{m.group(1)}-{m.group(2)}"] += 1
 
@@ -138,6 +151,7 @@ def run(pdf_path: str, cfg: dict, sample: int = 24, layout_pages: int = 3,
             "distinct_colors": colors,
             "palette": [{"hex": k, "spans": c, "chars": palette.chars[k],
                          "samples": palette.samples[k]} for k, c in palette.ordered()],
+            "drawing_colors": draw_colors.most_common(8),
         },
         "sidenote": {
             "found": sum(len(p.sidenotes) for p in per_page),
@@ -348,13 +362,24 @@ def report(d: dict, cfg: dict) -> str:
         for p in c["palette"][:6]:
             ex = p["samples"][0][1] if p["samples"] else ""
             a(f"| `{p['hex']}` | {p['spans']:,} | {p['chars']:,} | {ex[:40]} |")
+    if c.get("drawing_colors"):
+        a("")
+        a("- 도형(형광펜·밑줄·테두리) 유채색: " +
+          ", ".join(f"`{h}`×{n}" for h, n in c["drawing_colors"][:6]))
     if c["distinct_colors"] > 1:
         a("")
         a("- ⚠️ 색이 2종 이상이다. `_reports/palette.md` 를 보고 **사람이** 병합 기준을 "
           "정할 것 (§2.4). 자동 판정하지 않는다.")
     elif c["distinct_colors"] == 0:
         a("")
-        a("- ⚠️ 유채색이 없다. 강조색이 없는 판본이거나 색이 소실됐다. §5.4 WARN 대상.")
+        if c.get("drawing_colors"):
+            a("- ⚠️ **글자 색으로는 강조가 없다. 다만 도형에 색이 있다** — 강조가 "
+              "글자색이 아니라 형광펜(칠한 네모)일 수 있다. "
+              "`convert probe <pdf>` 로 확인할 것.")
+        else:
+            a("- ⚠️ 유채색이 글자에도 도형에도 없다. 강조색이 없는 판본이거나 색이 "
+              "소실됐다(압축본이면 그럴 수 있다). §5.4 WARN 대상. "
+              "`convert probe <pdf>` 로 원문을 직접 확인할 것.")
     a("")
 
     a("## 4) 우측 여백 옆번호 (§3.1-4, §4.3)")
