@@ -90,6 +90,8 @@ def main(argv=None) -> int:
     pr.add_argument("pdf")
     pr.add_argument("--find", help="이 글자가 몇 쪽에 있는지 (변환할 장 고를 때)")
     pr.add_argument("--page", type=int, help="이 쪽의 span·도형을 전부 덤프")
+    pr.add_argument("--color", type=int, metavar="쪽",
+                    help="이 쪽의 낱말마다 유채색 비율 (강조 임계값 정할 때)")
     pr.add_argument("--sample", type=int, default=40, help="훑을 쪽 수 (기본 40)")
     pr.add_argument("--pages", help="훑을 쪽을 직접 지정. 예: 120-160")
     pr.add_argument("--lines", action="store_true",
@@ -428,7 +430,9 @@ def _cmd_probe(args, cfg) -> int:
     if not pdf.exists():
         print(f"파일이 없다: {pdf}", file=sys.stderr)
         return 2
-    if args.lines:
+    if args.color:
+        text = probe_mod.color(str(pdf), cfg, args.color)
+    elif args.lines:
         rng = _page_range(args.pages)
         text = probe_mod.lines(str(pdf), cfg, get_profile(cfg, args.profile),
                                list(rng) if rng else None)

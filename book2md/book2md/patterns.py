@@ -185,7 +185,10 @@ class Patterns:
         """본문에 인용된 조문 (§P1-2). 글자는 손대지 않고 공백만 고른다."""
         out = []
         for m in self.article_cite.finditer(text):
-            cite = re.sub(r"\s+", " ", m.group(0)).strip()
+            # '제 174조' 와 '제174조' 가 따로 실리면 뒤 AI 가 다른 조문으로 읽는다.
+            # 조문 표기 안의 공백은 OCR 이 흘린 것이라 없앤다 (§P1-2).
+            cite = re.sub(r"\s+", "", m.group(0))
+            cite = re.sub(r"(?<=[조항호목의])(?=제)", " ", cite)
             if cite not in out:
                 out.append(cite)
         return out

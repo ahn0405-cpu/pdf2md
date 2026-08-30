@@ -93,6 +93,7 @@ class PyMuPDFParser(Parser):
             merge_overlap=float(ex.get("line_merge_overlap", 0.55)),
             merge_gap=float(ex.get("line_merge_max_gap", 0.06)),
             footer_zone=float(cfg.get("running", {}).get("footer_zone", 0.94)),
+            footer_gap_ratio=float(cfg.get("running", {}).get("footer_gap_ratio", 1.8)),
             footer_rx=[re.compile(x) for x in
                        cfg.get("running", {}).get("footer_patterns", [])],
             size_ratio=float(fn.get("size_ratio", 0.92)),
@@ -234,6 +235,8 @@ class PyMuPDFParser(Parser):
 
                 base = max(s["origin"][1] for s in spans)
                 pieces, sups, sizes, bolds = [], [], [], []
+                #: 그림에서 색을 읽을 때 줄 안의 낱말 판정을 모아 둔다 (§P0-2).
+                words: list[list] = []
                 for span in spans:
                     raw = span["text"]
                     rgb = to_rgb(span.get("color", 0))
@@ -257,16 +260,9 @@ class PyMuPDFParser(Parser):
                             if box is None or not seg.strip():
                                 pieces.append(("", seg))
                                 continue
-                            hexed, _ = sampler.classify(box)
-                            if hexed:
-                                srgb = tuple(int(hexed[j:j + 2], 16) for j in (1, 3, 5))
-                                key = self.palette.add(srgb, seg, page_no)
-                            else:
-                                key = None
-                                self.palette.total_spans += 1
-                            mark = self.palette.markup_for(key) \
-                                if (want_emphasis and key is not None) else ""
-                            pieces.append((mark, seg))
+                            hexed, ratio, weak = sampler.classify(box)
+                            pieces.append(("", seg))
+                            words.append([len(pieces) - 1, seg, hexed, ratio, weak])
                     else:
                         key = self.palette.add(rgb, raw, page_no) if self.palette else None
                         mark = ""
@@ -279,6 +275,8 @@ class PyMuPDFParser(Parser):
                     sizes.append(span["size"])
                     bolds.append(bold)
 
+                if words:
+                    self._settle_words(words, pieces, page_no, want_emphasis)
                 text = _render(pieces)
                 if not text.strip():
                     continue
@@ -291,6 +289,36 @@ class PyMuPDFParser(Parser):
                     sup_numbers=sups,
                 ))
         return out, sidenotes
+
+    def _settle_words(self, words, pieces, page_no, want_emphasis) -> None:
+        """줄 안의 낱말 판정을 확정한다 (§P0-2).
+
+        낱말마다 따로 재면 같은 구절인데도 획이 얇은 낱말, 한두 글자짜리
+        낱말이 문턱을 못 넘어 '==일부청구는 나머지== 부분에 대한 ==시효중단=='
+        처럼 누더기가 된다. 저자는 낱말이 아니라 **구절**을 칠했으므로, 확실한
+        낱말 사이에 낀 애매한 낱말은 같은 구절로 본다(이력 판정).
+
+        확실한 낱말이 하나도 없는 줄에서는 애매한 낱말을 살리지 않는다.
+        근거 없이 강조를 늘리면 §5.4 대조가 통째로 무의미해진다.
+        """
+        strong = [k for k, w in enumerate(words) if w[2]]
+        if strong:
+            lo, hi = strong[0], strong[-1]
+            for k in range(lo, hi + 1):
+                w = words[k]
+                if not w[2] and w[4]:
+                    # 확실한 낱말 사이에 낀 애매한 낱말 — 같은 구절로 본다
+                    w[2] = w[4]
+        for idx, seg, hexed, ratio, weak in words:
+            if hexed:
+                rgb = tuple(int(hexed[j:j + 2], 16) for j in (1, 3, 5))
+                key = self.palette.add(rgb, seg, page_no)
+            else:
+                key = None
+                self.palette.total_spans += 1
+            mark = self.palette.markup_for(key) \
+                if (want_emphasis and key is not None) else ""
+            pieces[idx] = (mark, seg)
 
     # ── 머리말·각주 영역 ─────────────────────────────────────────
     def _mark_zones(self, lines, height, body_size, opts):
@@ -325,11 +353,50 @@ class PyMuPDFParser(Parser):
             start = k
         if start is None:
             return
+        start = self._strip_tail_footer(lines, start, height, opts)
+        if start is None:
+            return
         if not re.match(r"^\d{1,4}\b", strip_markup(lines[start].stripped)):
             return          # 번호로 시작하지 않으면 각주가 아니다
         for line in lines[start:]:
             if line.zone != "header":
                 line.zone = "footnote"
+
+    @staticmethod
+    def _strip_tail_footer(lines, start, height, opts):
+        """각주 아래에 남은 줄을 꼬리말로 떼어낸다 (§4.1).
+
+        이 책은 [본문] → [가로선] → [각주] → [꼬리말] 순이다. 무늬로 잡으려
+        하면 못 잡는다 — OCR 이 'O과 nr CHAPTER 6 소송절차 개시' 나
+        'O과 己厂—I !' 처럼 쪽마다 다르게 흘려 놓기 때문이다.
+
+        가르는 것은 **세로 간격**이다. 각주는 줄간격으로 촘촘히 붙어 있고,
+        꼬리말은 그 아래로 한참 떨어져 있다. 각주 번호로 시작하지 않는다는
+        것만으로 떼면 여러 줄로 이어지는 긴 각주의 뒷줄을 통째로 버린다.
+        """
+        tail = [k for k in range(start, len(lines)) if lines[k].zone != "header"]
+        if len(tail) < 2:
+            return start
+        gaps = [lines[b].y0 - lines[a].y0 for a, b in zip(tail, tail[1:])]
+        gaps = [g for g in gaps if g > 0]
+        if not gaps:
+            return start
+        # 중앙값이 아니라 아래쪽 4분위를 쓴다. 각주가 한두 줄뿐인 쪽에서는
+        # 꼬리말까지의 큰 간격이 중앙값을 끌어올려 제 발등을 찍는다.
+        typical = sorted(gaps)[max(0, len(gaps) // 4)]
+        cut = float(opts.get("footer_gap_ratio", 1.8))
+        k = len(tail) - 1
+        while k > 0:
+            last, prev = lines[tail[k]], lines[tail[k - 1]]
+            if last.y0 - prev.y0 <= typical * cut:
+                break                    # 각주와 붙어 있다 — 각주의 뒷줄이다
+            if re.match(r"^\d{1,4}\b", strip_markup(last.stripped)):
+                break                    # 번호로 시작하면 각주다
+            last.zone = "header"
+            k -= 1
+        while start < len(lines) and lines[start].zone == "header":
+            start += 1
+        return start if start < len(lines) else None
 
     # ── 읽는 순서 ────────────────────────────────────────────────
     def _order(self, lines, width, want):

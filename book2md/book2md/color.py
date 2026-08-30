@@ -181,6 +181,8 @@ class ImageColorSampler:
         self.ink_max = int(cfg.get("ink_max", 205))
         self.chroma_min = int(cfg.get("chroma_min", 30))
         self.min_ratio = float(cfg.get("min_ratio", 0.20))
+        # 이력 판정의 아래 문턱. 확실한 낱말 사이에 낀 낱말만 이 값으로 살린다.
+        self.weak_ratio = float(cfg.get("min_ratio_weak", self.min_ratio * 0.5))
         self.CELL = float(cfg.get("grid_cell", self.CELL))
         self.step = max(1, int(cfg.get("pixel_step", 2)))
         self.scale = self.dpi / 72.0
@@ -234,8 +236,13 @@ class ImageColorSampler:
         self._grid = (ink, chroma, rsum, gsum, bsum)
 
     # ── 글자 상자 하나 ───────────────────────────────────────────
-    def classify(self, bbox) -> tuple[str | None, float]:
-        """(대표색 또는 None, 유채색 비율)."""
+    def classify(self, bbox) -> tuple[str | None, float, str | None]:
+        """(확실한 대표색 또는 None, 유채색 비율, 애매한 대표색 또는 None).
+
+        세 번째 값은 **문턱을 아슬아슬하게 못 넘은** 낱말의 색이다. 저자는
+        낱말이 아니라 구절을 칠하므로, 확실한 낱말 사이에 끼었을 때만 파서가
+        이것을 살린다(§P0-2). 혼자 있으면 버린다.
+        """
         if self._grid is None:
             self._build()
         ink_g, chroma_g, rsum, gsum, bsum = self._grid
@@ -253,9 +260,12 @@ class ImageColorSampler:
                 rs += rsum[k]
                 gs += gsum[k]
                 bs += bsum[k]
-        if not ink:
-            return None, 0.0
+        if not ink or not chroma:
+            return None, 0.0, None
         ratio = chroma / ink
-        if ratio < self.min_ratio or not chroma:
-            return None, ratio
-        return to_hex((rs // chroma, gs // chroma, bs // chroma)), ratio
+        hexed = to_hex((rs // chroma, gs // chroma, bs // chroma))
+        if ratio >= self.min_ratio:
+            return hexed, ratio, None
+        if ratio >= self.weak_ratio:
+            return None, ratio, hexed
+        return None, ratio, None

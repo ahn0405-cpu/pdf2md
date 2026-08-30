@@ -693,8 +693,9 @@ class 스캔본(unittest.TestCase):
         self.assertIn("bonus_topics:", md)
         # ① 논점 윤곽 띠
         self.assertIn('outline: ["의의", "소송물", "시효중단", "기판력"]', md)
-        # 꼬리말은 본문에도 각주에도 들어가지 않는다
-        self.assertNotIn("윤곽민사소송법", md)
+        # 꼬리말은 본문에도 각주에도 들어가지 않는다. 이 꼬리말은 무늬에
+        # 하나도 안 맞는다 — 각주와 떨어진 세로 간격으로만 가른다 (§4.1).
+        self.assertNotIn("己厂", md)
         # §P0-1 로마자가 소문자 L 로 흘러나와도 헤딩으로 선다
         self.assertIn("#### II. 소송물", md)
         self.assertIn("#### III. 기판력", md)
@@ -707,7 +708,7 @@ class 스캔본(unittest.TestCase):
         self.assertIn('id: "2005다12345"', md)
         # §P2-1 무엇을 버렸는지 남긴다
         removed = (out / "_reports" / "removed_lines.md").read_text(encoding="utf-8")
-        self.assertIn("154·윤곽민사소송법", removed)
+        self.assertIn("己厂", removed)
         self.assertIn("sE-8", removed)
 
     def test_로마자를_안_고치면_검증이_잡아낸다(self):

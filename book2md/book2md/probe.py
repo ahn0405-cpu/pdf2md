@@ -7,6 +7,7 @@
   probe scan   표본 쪽에서 괄호·색·옆번호·두문자 후보를 세어 늘어놓는다
   probe find   글자를 찾아 어느 쪽에 있는지 알려 준다 (변환할 장을 고를 때)
   probe page   한 쪽의 span 과 도형을 전부 덤프한다 (마지막 수단)
+  probe color  한 쪽의 낱말마다 유채색 비율을 재어 늘어놓는다 (임계값 정할 때)
 
 색이 span 색으로 안 나오면 형광펜(칠한 네모)일 수 있다. 그래서 도형도 함께 본다.
 """
@@ -371,4 +372,91 @@ def lines(pdf_path: str, cfg: dict, prof: dict, pages) -> str:
         for f in found:
             L.append(f"| {page.number} |  |  |  | 각주 | 정의 | "
                      f"[^{f.number}] {f.text[:44]} |")
+    return "\n".join(L) + "\n"
+
+
+def color(pdf_path: str, cfg: dict, number: int) -> str:
+    """한 쪽의 낱말마다 유채색 비율을 잰다 (§P0-2 임계값 정하기).
+
+    강조가 덜 잡히는지 더 잡히는지는 **비율 분포**를 봐야 안다. 문턱을 짐작으로
+    올리고 내리면 한쪽을 고칠 때마다 다른 쪽이 깨진다. 이 표를 보고
+    `preserve.color.min_ratio` 와 `min_ratio_weak` 를 정한다.
+    """
+    import pymupdf
+
+    from .color import ImageColorSampler
+    from .parsers.pymupdf_native import _restore_spaces, _span_text
+
+    color_cfg = cfg["preserve"]["color"]
+    gap = float(cfg.get("extract", {}).get("space_gap_ratio", 0.18))
+    doc = pymupdf.open(pdf_path)
+    if not (1 <= number <= doc.page_count):
+        return f"{number} 쪽이 없다 (전체 {doc.page_count}쪽)."
+    page = doc[number - 1]
+    sampler = ImageColorSampler(page, color_cfg)
+
+    rows = []
+    for block in page.get_text("rawdict")["blocks"]:
+        if block.get("type") != 0:
+            continue
+        for line in block.get("lines", []):
+            spans = [sp for sp in line.get("spans", []) if _span_text(sp).strip()]
+            if not spans:
+                continue
+            _restore_spaces(spans, gap)
+            for span in spans:
+                for seg, box in (span.get("_segs") or []):
+                    if box is None or not seg.strip():
+                        continue
+                    hexed, ratio, weak = sampler.classify(box)
+                    rows.append((ratio, seg.strip(), hexed or weak or "-",
+                                 round(box[1], 1),
+                                 "강조" if hexed else ("애매" if weak else "본문")))
+    doc.close()
+    if not rows:
+        return f"{number} 쪽에서 글자를 못 찾았다."
+
+    strong = sum(1 for r in rows if r[4] == "강조")
+    weakn = sum(1 for r in rows if r[4] == "애매")
+    L = [f"# 낱말별 유채색 비율 — `{pdf_path}` {number}쪽", "",
+         f"- 낱말 {len(rows)}개 · 강조 {strong} · 애매 {weakn} · "
+         f"본문 {len(rows) - strong - weakn}",
+         f"- 지금 문턱: `min_ratio` {sampler.min_ratio} · "
+         f"`min_ratio_weak` {sampler.weak_ratio} · "
+         f"`chroma_min` {sampler.chroma_min} · `grid_cell` {sampler.CELL}",
+         f"- 렌더 해상도 {sampler.dpi} dpi", ""]
+
+    bands = [0.0, 0.05, 0.10, 0.15, 0.20, 0.30, 0.45, 0.65, 1.01]
+    L.append("## 비율 분포")
+    L.append("")
+    L.append("| 구간 | 낱말 수 | |")
+    L.append("|---|---:|---|")
+    for lo, hi in zip(bands, bands[1:]):
+        n = sum(1 for r in rows if lo <= r[0] < hi)
+        L.append(f"| {lo:.2f} ~ {hi:.2f} | {n} | {'█' * min(60, n)} |")
+    L.append("")
+    L.append("> 색칠된 낱말과 검정 낱말은 두 봉우리로 갈린다. **골짜기**에 문턱을")
+    L.append("> 놓는다. 골짜기가 안 보이면 `chroma_min` 을 낮추거나 `image_dpi` 를")
+    L.append("> 올려야 한다 — 아직 색과 검정이 안 갈린 것이다.")
+    L.append("")
+
+    L.append("## 비율이 높은 낱말 (강조여야 한다)")
+    L.append("")
+    L.append("| 비율 | 판정 | 색 | y | 낱말 |")
+    L.append("|---:|---|---|---:|---|")
+    for ratio, seg, hexed, y, verdict in sorted(rows, reverse=True)[:60]:
+        L.append(f"| {ratio:.3f} | {verdict} | `{hexed}` | {y} | {seg[:30]} |")
+    L.append("")
+
+    middle = sorted((r for r in rows if 0.02 <= r[0] < sampler.min_ratio),
+                    reverse=True)
+    L.append("## 문턱 바로 아래 낱말 (놓치고 있는지 볼 것)")
+    L.append("")
+    L.append("| 비율 | 판정 | 색 | y | 낱말 |")
+    L.append("|---:|---|---|---:|---|")
+    for ratio, seg, hexed, y, verdict in middle[:60]:
+        L.append(f"| {ratio:.3f} | {verdict} | `{hexed}` | {y} | {seg[:30]} |")
+    L.append("")
+    L.append("이 표에 **원본에서 파란 낱말**이 섞여 있으면 `min_ratio` 를 그 아래로")
+    L.append("내린다. 검정 낱말만 있으면 지금 문턱이 맞다.")
     return "\n".join(L) + "\n"

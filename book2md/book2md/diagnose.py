@@ -155,7 +155,7 @@ def run(pdf_path: str, cfg: dict, sample: int = 24, layout_pages: int = 3,
         for i, boxes in span_boxes.items():
             sampler = ImageColorSampler(doc[i], color_cfg)
             for bbox, text in boxes:
-                hexed, _ = sampler.classify(bbox)
+                hexed, _, _ = sampler.classify(bbox)
                 image_palette.total_spans += 1
                 if hexed:
                     rgb = tuple(int(hexed[j:j + 2], 16) for j in (1, 3, 5))
