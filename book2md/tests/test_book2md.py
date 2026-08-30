@@ -726,21 +726,34 @@ class 스캔본(unittest.TestCase):
         self.assertIn("다만 그 범위는 따로 본다", md)
         self.assertIn("sE-8", removed)
 
-    def test_로마자를_안_고치면_검증이_잡아낸다(self):
-        """§V1·§V5 — 절이 헤딩에서 탈락하면 목차 대조가 걸러야 한다.
-
-        이 검사가 없으면 절 하나가 조용히 사라진다. 실제로 그렇게 사라졌다.
-        """
-        import copy
+    def _run_with(self, cfg, name):
         from book2md.pipeline import Pipeline
-        cfg = copy.deepcopy(CFG)
-        cfg["normalize"]["roman_heads"] = {}          # 일부러 끈다
-        out = self.tmp / "out_noroman"
+        out = self.tmp / name
         verdict = Pipeline(self.pdf, cfg, get_profile(cfg, "textbook"),
                            out / "기본서", out / "_reports", out / "_work",
                            "pymupdf", None, log=lambda *a: None).run("extract")
+        return verdict, (out / "_reports" / "warnings.md").read_text(encoding="utf-8")
+
+    def test_로마자를_못_고쳐도_목차가_받아_준다(self):
+        """§6.1 — 오인식 글자를 표에 등록 못 해도 목차 띠가 절을 되찾는다.
+
+        'I.' 이 '仁j', '।', 'H' 로 흘러나오는 것을 하나씩 등록해서는 끝이 없다.
+        답은 문서 안에 있다 — 논점 첫 줄의 목차 띠가 절 이름을 다 적어 둔다.
+        """
+        import copy
+        cfg = copy.deepcopy(CFG)
+        cfg["normalize"]["roman_heads"] = {}          # 일부러 끈다
+        verdict, _ = self._run_with(cfg, "out_noroman")
+        self.assertEqual(verdict, "PASS")
+
+    def test_둘_다_끄면_검증이_잡아낸다(self):
+        """§V1 — 안전망까지 없으면 절이 조용히 사라진다. 실제로 그랬다."""
+        import copy
+        cfg = copy.deepcopy(CFG)
+        cfg["normalize"]["roman_heads"] = {}
+        cfg["profiles"]["textbook"]["outline_heading"] = False
+        verdict, warn = self._run_with(cfg, "out_nonet")
         self.assertEqual(verdict, "FAIL")
-        warn = (out / "_reports" / "warnings.md").read_text(encoding="utf-8")
         self.assertIn("목차에 있는데 헤딩이 없다", warn)
         for lost in ("의의", "소송물", "기판력"):
             self.assertIn(lost, warn)
@@ -1054,6 +1067,60 @@ class 사람이_확정한_정정(unittest.TestCase):
         self.assertIn("(89다카4045)", got)
         m = PAT.case.search(got)
         self.assertEqual(PAT.case_problems(m), [])
+
+
+
+class 목차로_제목_되찾기(unittest.TestCase):
+    """§6.1 — 오인식 글자를 표에 등록하는 대신, 문서가 스스로 답을 갖고 있다"""
+
+    def _render(self, lines):
+        from book2md.structure import Structurer, render
+        from book2md.model import Line, Page
+        prof = dict(get_profile(CFG, "textbook"))
+        prof["_config"] = CFG
+        st = Structurer(CFG, prof, PAT)
+        st.feed(Page(number=1, lines=[Line(text=t, size=10) for t in lines]), [])
+        return render(st.finish())
+
+    def _heads(self, extra_lines):
+        out = self._render(["139 항고", "==◎ 의의-대상-절차-효과=="] + extra_lines)
+        return [l for l in out.split("\n") if l.startswith("####")]
+
+    def test_번호_자리의_잡글자를_떼고_목차와_맞춘다(self):
+        self.assertEqual(self._heads(["仁j 의의", "항고는 상소이다."]),
+                         ["#### 仁j 의의"])
+        self.assertEqual(self._heads(["口. 대상", "결정과 명령이다."]),
+                         ["#### 口. 대상"])
+        # 제목 뒤 기출연도는 붙어 있어도 된다
+        self.assertEqual(self._heads(["凵) 절차 (17)", "1주 이내에 한다."]),
+                         ["#### 凵) 절차 `(17)`"])
+
+    def test_잡글자가_없으면_건드리지_않는다(self):
+        """'효과는 다음과 같다' 같은 본문을 제목으로 오해하면 문단이 깨진다."""
+        self.assertEqual(self._heads(["효과는 다음과 같이 정리된다."]), [])
+        self.assertEqual(self._heads(["의의가 무엇인지 살펴본다."]), [])
+
+    def test_알아볼_수_있는_번호는_기존_규칙에_맡긴다(self):
+        self.assertEqual(self._heads(["(2) 효과를 살펴본다."]), [])
+
+    def test_문장으로_끝나면_제목이_아니다(self):
+        self.assertEqual(self._heads(["仁j 의의를 아래에서 살펴본다."]), [])
+
+    def test_논점이_바뀌면_목차도_바뀐다(self):
+        out = self._render([
+            "139 항고", "==◎ 의의-대상-절차-효과==",
+            "140 재심",                          # 새 논점 — 앞 목차는 잊는다
+            "仁j 대상", "재심의 대상은 확정판결이다."])
+        self.assertNotIn("#### 仁j 대상", out)
+
+    def test_박스_오인식보다_목차를_믿는다(self):
+        """'口' 는 ☑ 오인식이기도 하다. 박스 제목은 목차에 오르지 않는다."""
+        out = self._render([
+            "139 항고", "==◎ 의의-대상-절차-효과==",
+            "口. 대상", "결정과 명령이다.",
+            "☑ 즉시항고와 통상항고", "기간의 제한이 있다."])
+        self.assertIn("#### 口. 대상", out)
+        self.assertIn("> ### ☑ 즉시항고와 통상항고", out)
 
 
 if __name__ == "__main__":

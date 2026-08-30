@@ -30,6 +30,15 @@ _RUNIN = re.compile(
 #: 제목이 줄 가운데에 오려면 앞이 문장으로 끝나야 한다. 각주 참조로 끝나도 된다.
 _RUNIN_BEFORE = re.compile(r"(?:[.?!\]\)]|다\.|음\.|함\.)\s*$")
 
+#: 번호 자리에 낀 잡글자 + 제목. 잡글자에 한글은 못 들어간다.
+_OUTLINE_JUNK = re.compile(
+    r"^(?P<junk>[^가-힣\s]{1,6}[.,·•‧∙・)\]]?\s*)(?P<rest>[가-힣].*)$")
+#: 알아볼 수 있는 번호. 이런 것은 기존 규칙이 이미 맡고 있으므로 넘긴다.
+_KNOWN_NUM = re.compile(r"^[\d IVXivx.,·•‧∙・()\[\]]+$")
+#: 문장으로 끝나면 제목이 아니다. 닫는 괄호는 세지 않는다 — 제목 뒤에
+#: 기출연도가 '(17)' 로 붙는 일이 잦다.
+_OUTLINE_NOT_HEAD = re.compile(r"(?:[.?!]|다\.|음\.|함\.)\s*$")
+
 
 @dataclass
 class Block:
@@ -77,6 +86,10 @@ class Structurer:
         self._toc_rx = re.compile(cfg.get("toc", {}).get("line", r"(?!)"))
         self._side_tol = float(legend["sidenote"].get("match_tolerance", 12))
 
+        self._outline_names: list[str] = []
+        self._outline_use = bool(prof.get("outline_heading", True))
+        self._outline_junk = int(prof.get("outline_junk_max", 4))
+        self._outline_tail = int(prof.get("outline_tail_max", 12))
         self._heads = [(h["level"], re.compile(h["pattern"]))
                        for h in prof.get("headings", [])]
         self._sec_rx = re.compile(prof["section_item"]) if prof.get("section_item") else None
@@ -158,12 +171,23 @@ class Structurer:
                 self._heading(level, plain, page_no, y=getattr(line, "y0", None))
                 self._in_roman = (level == 4)
                 self._last_item = 0
+                if level <= 3:
+                    self._outline_names = []     # 논점이 바뀌면 목차도 바뀐다
                 return
         items = self._outline_items(plain)
         if items:
             self._flush_para()
+            # 이 논점의 절 이름을 기억해 둔다. 번호 자리가 뭉개진 제목을
+            # 되찾는 유일한 근거다 (아래 _outline_head).
+            self._outline_names = [t for t in items if len(t) >= 2]
             self.blocks.append(self._mk("para", text, page=page_no,
                                         meta={"outline": items}))
+            return
+        name = self._outline_head(plain)
+        if name:
+            self._heading(4, plain, page_no, y=getattr(line, "y0", None))
+            self._in_roman = True
+            self._last_item = 0
             return
         m = self._sec_rx.match(plain) if self._sec_rx else None
         if m:
@@ -273,6 +297,38 @@ class Structurer:
             return self._sidenotes.pop(best)["text"]
         return None
 
+    def _outline_head(self, plain: str) -> str | None:
+        """번호 자리가 뭉개진 절 제목을 목차 띠로 되찾는다.
+
+        OCR 은 절 번호를 온갖 글자로 흘린다 — 'I.' 이 '仁j', '।', 'H' 로.
+        표에 하나씩 등록해서는 끝이 없다. 그런데 답은 이미 문서 안에 있다:
+        논점 첫 줄의 목차 띠(`◎ 의의-사유-절차-효과`)가 절 이름을 다 적어 둔다.
+
+            '仁j 의의'  →  앞의 '仁j' 를 떼면 '의의'  →  목차에 있다  →  절 제목
+
+        **앞에 한글 아닌 잡글자가 붙어 있을 때만** 본다. 잡글자가 없으면
+        '효과는 다음과 같다' 같은 본문 문단을 제목으로 오해한다.
+        """
+        if not self._outline_names or not self._outline_use:
+            return None
+        if len(plain) > self._sec_max or _OUTLINE_NOT_HEAD.search(plain):
+            return None
+        m = _OUTLINE_JUNK.match(plain)
+        if not m:
+            return None
+        junk, rest = m.group("junk"), m.group("rest")
+        if not junk.strip() or len(junk.strip()) > self._outline_junk:
+            return None
+        if _KNOWN_NUM.match(junk):
+            return None      # '1.', '(2)', 'IV.' 는 기존 규칙이 맡는다
+        for name in self._outline_names:
+            if not rest.startswith(name):
+                continue
+            tail = rest[len(name):].strip()
+            if len(tail) <= self._outline_tail:
+                return name
+        return None
+
     def _runin(self, text: str, plain: str):
         """'==I. 의의 및 취지== 당사자와 …' 을 (제목, 나머지) 로 가른다.
 
@@ -294,7 +350,9 @@ class Structurer:
         head_plain = _strip_markup(head)
         if len(head_plain) > int(self.prof.get("section_max_len", 40)):
             return None
-        if not any(rx.match(head_plain) for _, rx in self._heads):
+        # 제목 무늬에 맞거나, 목차 띠가 절 이름이라고 말해 주거나.
+        if not (any(rx.match(head_plain) for _, rx in self._heads)
+                or self._outline_head(head_plain)):
             return None
         return (before, m.group("mark") + head + m.group("mark"), head_plain, rest)
 
@@ -339,7 +397,14 @@ class Structurer:
 
     # ── ⑧ 보너스 논점 박스 (§4.4) ────────────────────────────────
     def _bonus_head(self, text: str) -> str | None:
-        """줄 맨 앞 ☑(또는 그 오인식) 뒤에 한글 제목이 오면 박스 시작으로 본다."""
+        """줄 맨 앞 ☑(또는 그 오인식) 뒤에 한글 제목이 오면 박스 시작으로 본다.
+
+        ☑ 오인식 목록과 절 번호 오인식은 겹친다 — '口' 가 둘 다다.
+        목차 띠가 절 이름이라고 말해 주면 그쪽을 믿는다. 박스 제목은 목차에
+        오르지 않는다.
+        """
+        if self._outline_head(text):
+            return None
         first = text[0]
         rest = text[1:].strip()
         if first == self._bonus_marker or first in self._bonus_misread:
