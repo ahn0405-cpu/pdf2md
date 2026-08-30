@@ -273,9 +273,26 @@ class 정정(unittest.TestCase):
         self.assertTrue(any(c.kind == "correction" for c in changes))
 
     def test_목록이_비면_아무것도_바꾸지_않는다(self):
+        """적힌 것이 없으면 손대지 않는다. 스스로 고치는 길은 없다."""
+        import copy
+        cfg = copy.deepcopy(CFG)
+        cfg["corrections"] = []
         changes: list = []
-        out = Normalizer(CFG, PAT).normalize_line("볼 수 없다仏018다210539).", 1, changes)
-        self.assertIn("仏018다210539", out)      # 스스로 고치지 않는다
+        out = Normalizer(cfg, Patterns.build(cfg)).normalize_line(
+            "볼 수 없다仏018다210539).", 1, changes)
+        self.assertIn("仏018다210539", out)
+        self.assertFalse(changes)
+
+    def test_배포_설정에_적힌_정정이_실제로_돈다(self):
+        """config.yaml 에 적어 둔 것들이 문법 오류 없이 적용되는지."""
+        entries = CFG.get("corrections") or []
+        self.assertTrue(entries, "배포 설정에 정정이 하나도 없다")
+        norm = Normalizer(CFG, PAT)
+        for e in entries:
+            changes: list = []
+            out = norm.normalize_line(f"판시 {e['find']}).", 1, changes)
+            self.assertIn(e["to"], out)
+            self.assertTrue(any(c.kind == "correction" for c in changes))
 
 
 class 오검출(unittest.TestCase):
