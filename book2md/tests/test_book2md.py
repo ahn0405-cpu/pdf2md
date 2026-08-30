@@ -781,11 +781,15 @@ class 수정요청_01(unittest.TestCase):
     """수정 요청 #01 — 낱글자가 틀리면 안 되는 자리들"""
 
     def test_로마자_절번호를_헤딩_판정_전에_되돌린다(self):
-        # 마침표 뒤에 공백이 없는 것이 실물의 defect 였다
-        self.assertEqual(norm("Ill.중복소제기"), "III.중복소제기")
+        # 마침표 뒤에 공백이 없는 것이 실물의 defect 였다. 종이에는 공백이
+        # 있으므로 함께 되살린다.
+        self.assertEqual(norm("Ill.중복소제기"), "III. 중복소제기")
+        self.assertEqual(norm("==Ill.중복소제기=="), "==III. 중복소제기==")
         self.assertEqual(norm("lll. 기판력"), "III. 기판력")
-        self.assertEqual(norm("N.소의 이익"), "IV.소의 이익")
+        self.assertEqual(norm("N.소의 이익"), "IV. 소의 이익")
         self.assertEqual(norm("씨. 과실상계"), "VI. 과실상계")
+        # 문장 속 번호는 건드리지 않는다
+        self.assertEqual(norm("판시는 1.그렇다"), "판시는 1.그렇다")
 
     def test_본문_속_소문자_L_은_건드리지_않는다(self):
         self.assertEqual(norm("본문에 l 이 섞여 있다"), "본문에 l 이 섞여 있다")

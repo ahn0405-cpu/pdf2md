@@ -27,6 +27,11 @@ _ROMAN_HEAD = re.compile(
 #: 제N죄/제N좌 → 제N조 (조문번호 안에서만)
 _ARTICLE_OCR = re.compile(r"제\s*(\d+)\s*[죄좌](?![가-힣])")
 
+#: 'III.중복소제기' 처럼 번호 뒤 공백을 OCR 이 삼킨 것. 종이에는 있다.
+#: 줄 맨 앞 + 번호 + 구분점 + 한글일 때만 넣는다.
+_HEAD_SPACE = re.compile(
+    r"^((?:[=*]{2})?\s*(?:[IVX]{1,5}|\d{1,2})\s*[.)])(?=[가-힣])")
+
 #: '1 .문제점' 처럼 번호와 마침표 사이가 벌어진 것. 줄 앞에서만 고친다.
 _ITEM_SPACE = re.compile(r"^(\s*(?:[=*]{2})?\s*[0-9IVXivx]{1,4})\s+([.)])")
 
@@ -63,6 +68,7 @@ class Normalizer:
         self.collapse = bool(n.get("collapse_spaces", True))
         self.fix_dates = bool(n.get("fix_dates", True))
         self.item_space = bool(n.get("item_number_space", True))
+        self.head_space = bool(n.get("heading_number_space", True))
         self.roman = _roman_table(n.get("roman_heads", {}))
         self.article_ocr = bool(n.get("article_ocr", True))
         self.title_brackets = bool(n.get("repair_title_brackets", True))
@@ -112,6 +118,12 @@ class Normalizer:
             text = _ARTICLE_OCR.sub(lambda m: f"제{m.group(1)}조", text)
         if self.item_space:
             text = _ITEM_SPACE.sub(r"\1\2", text)
+        if self.head_space:
+            fixed = _HEAD_SPACE.sub(r"\1 ", text)
+            if fixed != text:
+                changes.append(Change(page_no, "space", text, fixed,
+                                      "번호 뒤 공백 복원"))
+                text = fixed
         if self.fix_dates:
             text = self._dates(text, page_no, changes)
         if self.collapse:

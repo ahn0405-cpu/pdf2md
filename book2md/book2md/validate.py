@@ -454,11 +454,13 @@ def _emphasis_pages(res, cfg, baseline):
         # 글자에 색이 박힌 PDF 는 색을 흘릴 자리가 없어 셀 이유도 없다.
         return
     need = int(cfg["validation"].get("fail_on", {})
-               .get("emphasis_per_standard_page", 5))
-    thin = [(p, emph.get(str(p), 0)) for p in pages if emph.get(str(p), 0) < need]
+               .get("emphasis_per_standard_page", 0))
     res.counts["standard_pages"] = len(pages)
-    res.counts["emphasis_thin_pages"] = len(thin)
     res.counts["emphasis_total"] = sum(emph.values())
+    if need <= 0:
+        return          # 색상 추출이 취소되어 이 검사도 내렸다 (수정 요청 #01 개정)
+    thin = [(p, emph.get(str(p), 0)) for p in pages if emph.get(str(p), 0) < need]
+    res.counts["emphasis_thin_pages"] = len(thin)
     if thin:
         head = ", ".join(f"p.{p}({n})" for p, n in thin[:12])
         res.add("FAIL", "5.4 강조",
