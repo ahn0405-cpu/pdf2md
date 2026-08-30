@@ -247,6 +247,29 @@ class ImageColorSampler:
         ink_g, chroma_g = self._grid[0], self._grid[1]
         return sum(ink_g), sum(chroma_g)
 
+    def density(self, bbox) -> float:
+        """상자 안 잉크 화소의 비율. 획이 굵을수록 크다.
+
+        스캔본에서 굵은 글씨를 가리는 유일한 근거다. OCR 이 붙여 준 글꼴
+        속성은 지어낸 것이라 못 쓴다(§P0-2). 같은 줄의 가운뎃값과 견주어야
+        글자 크기·스캔 농도가 상쇄된다.
+        """
+        if self._grid is None:
+            self._build()
+        ink_g = self._grid[0]
+        c0 = max(0, int(bbox[0] / self.CELL))
+        c1 = min(self.cols - 1, int(bbox[2] / self.CELL))
+        r0 = max(0, int(bbox[1] / self.CELL))
+        r1 = min(self.rows - 1, int(bbox[3] / self.CELL))
+        ink = 0
+        for row in range(r0, r1 + 1):
+            base = row * self.cols
+            for col in range(c0, c1 + 1):
+                ink += ink_g[base + col]
+        cells = (c1 - c0 + 1) * (r1 - r0 + 1)
+        per_cell = (self.CELL * self.scale / self.step) ** 2
+        return ink / (cells * per_cell) if cells and per_cell else 0.0
+
     def cells_in(self, bbox) -> set:
         """글자 상자가 덮는 격자 칸 번호."""
         if self._grid is None:

@@ -266,7 +266,8 @@ class PyMuPDFParser(Parser):
                                 continue
                             hexed, ratio, weak = sampler.classify(box)
                             pieces.append(("", seg))
-                            words.append([len(pieces) - 1, seg, hexed, ratio, weak])
+                            words.append([len(pieces) - 1, seg, hexed, ratio, weak,
+                                          sampler.density(box)])
                     else:
                         key = self.palette.add(rgb, raw, page_no) if self.palette else None
                         mark = ""
@@ -280,7 +281,8 @@ class PyMuPDFParser(Parser):
                     bolds.append(bold)
 
                 if words:
-                    self._settle_words(words, pieces, page_no, want_emphasis)
+                    self._settle_words(words, pieces, page_no, want_emphasis,
+                                       color_cfg)
                 text = _render(pieces)
                 if not text.strip():
                     continue
@@ -294,16 +296,20 @@ class PyMuPDFParser(Parser):
                 ))
         return out, sidenotes
 
-    def _settle_words(self, words, pieces, page_no, want_emphasis) -> None:
+    def _settle_words(self, words, pieces, page_no, want_emphasis,
+                      color_cfg) -> None:
         """줄 안의 낱말 판정을 확정한다 (§P0-2).
 
-        낱말마다 따로 재면 같은 구절인데도 획이 얇은 낱말, 한두 글자짜리
-        낱말이 문턱을 못 넘어 '==일부청구는 나머지== 부분에 대한 ==시효중단=='
-        처럼 누더기가 된다. 저자는 낱말이 아니라 **구절**을 칠했으므로, 확실한
-        낱말 사이에 낀 애매한 낱말은 같은 구절로 본다(이력 판정).
-
+        ① 색. 낱말마다 따로 재면 같은 구절인데도 획이 얇은 낱말, 한두 글자짜리
+        낱말이 문턱을 못 넘어 누더기가 된다. 저자는 낱말이 아니라 **구절**을
+        칠했으므로, 확실한 낱말 사이에 낀 애매한 낱말은 같은 구절로 본다.
         확실한 낱말이 하나도 없는 줄에서는 애매한 낱말을 살리지 않는다.
-        근거 없이 강조를 늘리면 §5.4 대조가 통째로 무의미해진다.
+
+        ② 굵기. 이 교재의 본문 강조는 **검정 굵은 글씨**다(청색은 제목과
+        두문자에만 쓴다). 스캔본이라 OCR 이 붙여 준 글꼴 속성은 못 쓰므로,
+        그림에서 잰 잉크 밀도를 같은 줄의 가운뎃값과 견준다. 줄이 짧으면
+        가운뎃값을 믿을 수 없어 굵기를 판정하지 않는다 — 없는 강조를 지어내는
+        것이 놓치는 것보다 나쁘다.
         """
         strong = [k for k, w in enumerate(words) if w[2]]
         if strong:
@@ -313,15 +319,33 @@ class PyMuPDFParser(Parser):
                 if not w[2] and w[4]:
                     # 확실한 낱말 사이에 낀 애매한 낱말 — 같은 구절로 본다
                     w[2] = w[4]
-        for idx, seg, hexed, ratio, weak in words:
+
+        bold_mark = ""
+        if want_emphasis and color_cfg.get("bold_from_image", True):
+            bold_mark = color_cfg.get("markup", {}).get("bold", "**")
+        heavy = set()
+        if bold_mark:
+            body = [w for w in words if len(w[1].strip()) >= 2 and w[5] > 0]
+            if len(body) >= int(color_cfg.get("bold_min_words", 6)):
+                dens = sorted(w[5] for w in body)
+                mid = dens[len(dens) // 2]
+                cut = mid * float(color_cfg.get("bold_density_ratio", 1.22))
+                heavy = {id(w) for w in body if w[5] >= cut}
+
+        for w in words:
+            idx, seg, hexed = w[0], w[1], w[2]
             if hexed:
                 rgb = tuple(int(hexed[j:j + 2], 16) for j in (1, 3, 5))
                 key = self.palette.add(rgb, seg, page_no)
             else:
                 key = None
                 self.palette.total_spans += 1
-            mark = self.palette.markup_for(key) \
-                if (want_emphasis and key is not None) else ""
+            if want_emphasis and key is not None:
+                mark = self.palette.markup_for(key)
+            elif id(w) in heavy:
+                mark = bold_mark
+            else:
+                mark = ""
             pieces[idx] = (mark, seg)
 
     # ── 머리말·각주 영역 ─────────────────────────────────────────
@@ -339,7 +363,7 @@ class PyMuPDFParser(Parser):
         zone = float(opts.get("repeat_zone", 0.12))
         small = body_size * opts["size_ratio"]
         band_len = int(opts.get("band_max_len", 40))
-        edge = {id(ordered[0]), id(ordered[-1])}
+        top_id = id(ordered[0])
 
         for line in ordered:
             if line.y1 <= height * opts["header_zone"]:
@@ -348,9 +372,8 @@ class PyMuPDFParser(Parser):
             # 위·아래 띠, 그리고 쪽의 첫 줄·끝 줄. 장 제목 띠는 책마다 위에
             # 오기도 하고 아래 오기도 하며, 여백이 넉넉한 쪽에서는 띠를
             # 벗어나 앉는다. 자리(첫 줄·끝 줄)로도 함께 본다.
-            in_band = (line.y1 <= height * zone
-                       or line.y0 >= height * (1 - zone)
-                       or id(line) in edge)
+            at_top = line.y1 <= height * zone or id(line) == top_id
+            in_band = at_top or line.y0 >= height * (1 - zone)
             if not in_band:
                 continue
             plain = strip_markup(line.stripped)
@@ -358,11 +381,18 @@ class PyMuPDFParser(Parser):
                 line.zone = "header"        # 머리말·꼬리말은 본문이 아니다 (§4.1)
             elif running and _running_key(plain) in running:
                 line.zone = "header"        # 쪽마다 되풀이되는 줄
-            elif (opts.get("strip_small_in_band", True) and line.size < small
-                  and len(plain) <= band_len and not _HEADING_LIKE.match(plain)):
-                # 띠 안의 작고 짧은 줄. OCR 이 쪽마다 다르게 흘려 놓아
+            elif (at_top and opts.get("strip_small_in_band", True)
+                  and line.size < small and len(plain) <= band_len
+                  and not _HEADING_LIKE.match(plain)
+                  and not _FOOTNOTE_LIKE.match(plain)):
+                # 쪽 맨 위의 작고 짧은 줄. OCR 이 쪽마다 다르게 흘려 놓아
                 # ('O과 己厂—I !') 무늬로도 되풀이로도 못 잡는다. 본문은 이 자리에
                 # 이렇게 작고 짧게 서지 않는다.
+                #
+                # **위에서만** 쓴다. 아래는 각주가 차지하고 있어서, 같은 규칙을
+                # 쓰면 '262) 소유권 확인의 소에서…' 같은 각주와 여러 줄로
+                # 이어지는 각주의 뒷줄을 통째로 버린다. 아래쪽 꼬리말은
+                # 무늬·되풀이·세로 간격(_strip_tail_footer)으로 가른다.
                 line.zone = "header"
 
         limit = height * (1.0 - opts["bottom_zone"])
@@ -610,6 +640,9 @@ _RUNNING_KEEP = re.compile(r"[^0-9A-Za-z가-힣一-鿿]+")
 #: 오는 일이 있다.
 _HEADING_LIKE = re.compile(
     r"^\s*(?:\d{3}\s|CHAPTER\s*\d|제\s*\d+\s*[편장절관]|[IVX]{1,5}\s*[.)])")
+
+#: 각주는 절대 머리말로 보면 안 된다.
+_FOOTNOTE_LIKE = re.compile(r"^\s*\d{1,4}\s*[).\]]")
 
 
 def _running_key(text: str) -> str:

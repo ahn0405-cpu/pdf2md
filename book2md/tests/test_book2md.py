@@ -674,6 +674,11 @@ class 스캔본(unittest.TestCase):
         self.assertIn("==확장의 뜻을 밝힌 때에는 전부에 미친다==", md)
         # §P0-2 한 문장 안에서 앞쪽 낱말만 청색인 판시 본문
         self.assertIn("==일부청구는 나머지 부분에== 시효중단 효력이 없다(74다1557).", md)
+        # 굵은 글씨가 없는 쪽에서는 굵기 판정이 하나도 안 나와야 한다.
+        # 없는 강조를 지어내는 것이 놓치는 것보다 나쁘다 (§P0-2).
+        body = md.split("---\n", 2)[-1]
+        for phrase in ("**분할**", "**효력이**", "**있을**"):
+            self.assertNotIn(phrase, body)
         # §2.5 'NNN)' 꼴 각주: 정의와 본문 참조가 모두 살아 있다
         self.assertIn("[^264]:", md)
         self.assertIn("[^265]", md.split("[^264]:")[0])

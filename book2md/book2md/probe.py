@@ -402,7 +402,7 @@ def color(pdf_path: str, cfg: dict, number: int, image=None) -> str:
     page = doc[number - 1]
     sampler = ImageColorSampler(page, color_cfg)
 
-    rows, boxes = [], []
+    rows, lines_out = [], []
     for block in page.get_text("rawdict")["blocks"]:
         if block.get("type") != 0:
             continue
@@ -411,6 +411,7 @@ def color(pdf_path: str, cfg: dict, number: int, image=None) -> str:
             if not spans:
                 continue
             _restore_spaces(spans, gap)
+            here = []
             for span in spans:
                 for seg, box in (span.get("_segs") or []):
                     if box is None or not seg.strip():
@@ -419,11 +420,14 @@ def color(pdf_path: str, cfg: dict, number: int, image=None) -> str:
                     verdict = "강조" if hexed else ("애매" if weak else "본문")
                     rows.append((ratio, seg.strip(), hexed or weak or "-",
                                  round(box[1], 1), verdict))
-                    boxes.append((box, verdict))
+                    here.append((seg.strip(), box, sampler.density(box), verdict))
+                if here:
+                    lines_out.append(here)
     if not rows:
         doc.close()
         return f"{number} 쪽에서 글자를 못 찾았다."
 
+    boxes = [(b, v) for here in lines_out for _, b, _, v in here]
     ink_all, chroma_all = sampler.totals()
     seen: dict[str, set] = {"강조": set(), "애매": set(), "본문": set()}
     for box, verdict in boxes:
@@ -498,18 +502,65 @@ def color(pdf_path: str, cfg: dict, number: int, image=None) -> str:
         L.append(f"| {ratio:.3f} | {verdict} | `{hexed}` | {y} | {seg[:30]} |")
     L.append("")
 
+    cut = float(color_cfg.get("bold_density_ratio", 1.45))
+    need = int(color_cfg.get("bold_min_words", 6))
+    heavy, ratios = [], []
+    for here in lines_out:
+        body = [w for w in here if len(w[0]) >= 2 and w[2] > 0]
+        if len(body) < need:
+            continue
+        dens = sorted(w[2] for w in body)
+        mid = dens[len(dens) // 2]
+        for seg, box, d, verdict in body:
+            ratios.append(d / mid)
+            if d >= mid * cut and verdict == "본문":
+                heavy.append((d / mid, seg, round(box[1], 1)))
+    L.append("## 굵기 — 이 교재의 본문 강조는 **검정 굵은 글씨**다")
+    L.append("")
+    L.append(f"같은 줄 가운뎃값의 몇 배인지로 잰다. 지금 문턱 "
+             f"`bold_density_ratio` {cut}. 잰 낱말 {len(ratios)}개.")
+    L.append("")
+    L.append("| 구간 | 낱말 수 | |")
+    L.append("|---|---:|---|")
+    for lo, hi in ((0, 0.9), (0.9, 1.1), (1.1, 1.3), (1.3, 1.5),
+                   (1.5, 1.8), (1.8, 99)):
+        n = sum(1 for r in ratios if lo <= r < hi)
+        L.append(f"| {lo:.1f} ~ {hi:.1f} | {n} | {'█' * min(60, n)} |")
+    L.append("")
+    L.append(f"굵은 글씨로 잡힌 것 {len(heavy)}개 (색이 아닌 것만):")
+    L.append("")
+    L.append("| 배수 | y | 낱말 |")
+    L.append("|---:|---:|---|")
+    for r, seg, y in sorted(heavy, reverse=True)[:40]:
+        L.append(f"| {r:.2f} | {y} | {seg[:30]} |")
+    L.append("")
+    L.append("여기에 **원본에서 보통 굵기인 낱말**이 섞여 있으면 문턱을 올린다.")
+    L.append("굵은데 안 잡힌 낱말이 많으면 내린다.")
+    L.append("")
+
     if image:
-        from pathlib import Path
+        heavy_boxes = set()
+        for here in lines_out:
+            body = [w for w in here if len(w[0]) >= 2 and w[2] > 0]
+            if len(body) < need:
+                continue
+            dens = sorted(w[2] for w in body)
+            mid = dens[len(dens) // 2]
+            for seg, box, d, verdict in body:
+                if d >= mid * cut and verdict == "본문":
+                    heavy_boxes.add(tuple(box))
         for box, verdict in boxes:
+            if tuple(box) in heavy_boxes:
+                page.draw_rect(pymupdf.Rect(*box), color=(0.6, 0, 0.7), width=0.7)
             col = {"강조": (0, 0.55, 0), "애매": (0.9, 0.5, 0)}.get(verdict)
             if col:
                 page.draw_rect(pymupdf.Rect(*box), color=col, width=0.7)
         page.get_pixmap(dpi=int(color_cfg.get("image_dpi_max", 200))).save(str(image))
         L.append(f"## 그림")
         L.append("")
-        L.append(f"`{image}` — 초록 네모가 **강조**, 주황이 **애매** 로 판정한 "
-                 f"낱말이다. 원본에서 파란 글자와 견줄 것. 네모가 글자에서 "
-                 f"어긋나 있으면 상자 문제다.")
+        L.append(f"`{image}` — 초록이 **색 강조**, 주황이 **애매**, 보라가 "
+                 f"**굵은 글씨** 로 판정한 낱말이다. 원본과 견줄 것. 네모가 "
+                 f"글자에서 어긋나 있으면 상자 문제다.")
         L.append("")
     doc.close()
     return "\n".join(L) + "\n"
