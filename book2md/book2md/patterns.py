@@ -19,6 +19,7 @@ class Patterns:
     case: re.Pattern              # 사건번호
     case_loose: re.Pattern        # 공백이 낀 사건번호까지 (정규화 전 원문용)
     case_star: re.Pattern         # 사건번호 + 별표
+    case_star_loose: re.Pattern   # 공백이 낀 것까지 (정규화 전 원문 대조용)
     mnemonic: re.Pattern          # 두문자 [일나시 나소시]
     mnemonic_like: re.Pattern     # 괄호 종류를 가리지 않는 두문자 모양
     date: re.Pattern              # 2011. 4. 26.
@@ -66,6 +67,13 @@ class Patterns:
             rf"(?<!\*){star_cls}(?!\*)"
         )
 
+        # 원본(정규화 전)에는 '91 다43176*' 처럼 공백이 낀다. 엄격한 패턴으로
+        # 원본을 세면 그만큼 적게 잡혀, 변환본이 늘어난 것처럼 보인다.
+        case_star_loose = re.compile(
+            rf"(?<![0-9A-Za-z,])\d{{2,4}}\s*(?:{suffixes})\s*\d+(?![0-9])"
+            rf"\s{{0,{gap}}}(?<!\*){star_cls}(?!\*)"
+        )
+
         mn = pre["mnemonic"]
         # 두문자 안에는 숫자가 섞이기도 한다([송완불2괴]). 다만 숫자만인 덩어리는
         # 두문자가 아니므로 한글이 한 자 이상 있어야 한다.
@@ -104,6 +112,7 @@ class Patterns:
 
         return cls(
             case=case, case_loose=case_loose, case_star=case_star,
+            case_star_loose=case_star_loose,
             mnemonic=mnemonic, mnemonic_like=mnemonic_like,
             date=date, article=article,
             footnote_ref=footnote_ref, footnote_def=footnote_def,

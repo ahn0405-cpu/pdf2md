@@ -116,6 +116,27 @@ class 각주(unittest.TestCase):
         self.assertEqual(b, [])
         self.assertIn("최근 判例 는 요건을 추가하였다.", a[0].text)
 
+    def test_조문_번호를_각주_참조로_바꾸지_않는다(self):
+        """'제38조 1항' 의 1 이 [^1] 이 되면 조문이 통째로 망가진다."""
+        col = FootnoteCollector(CFG, PAT)
+        page = self._page(
+            1, ["이송결정의 구속력 [제38조 1항 및 2항]",
+                "제1심 법원은 2020. 1. 16. 판결하였다.[^1]"],
+            ["1) 각주 본문이다. 충분히 길게 적어 각주로 보이게 한다."])
+        col.process(page)
+        body = "\n".join(l.text for l in page.lines)
+        self.assertIn("제38조 1항 및 2항", body)
+        self.assertIn("제1심", body)
+        self.assertNotIn("[^2]", body)
+
+    def test_괄호가_붙은_번호는_각주_참조로_본다(self):
+        col = FootnoteCollector(CFG, PAT)
+        page = self._page(
+            1, ["판시한다(2019다223723).264)"],
+            ["264) 즉, 최근 판시가 요건을 추가한 것이다. 충분히 길게 적는다."])
+        col.process(page)
+        self.assertIn("[^264]", page.lines[0].text)
+
     def test_각주는_본문에서_분리된다(self):
         col = FootnoteCollector(CFG, PAT)
         page = self._page(1, ["본문이다"], ["264 각주다"])
@@ -310,6 +331,13 @@ class 검증(unittest.TestCase):
 
     def _write(self, body, fm='---\nsource: 기본서\nparser: pymupdf\ncases:\n'):
         (self.dir / "a.md").write_text(fm + "---\n\n" + body, encoding="utf-8")
+
+    def test_원본_별표는_공백이_껴도_센다(self):
+        """원본에는 '91 다43176*' 처럼 공백이 낀다. 엄격 패턴으로 원본을 세면
+        변환본이 늘어난 것처럼 보여 엉뚱한 FAIL 이 난다."""
+        raw = "판시 (91 다43176*) 와 (74다1557*) 이다."
+        self.assertEqual(len(PAT.case_star_loose.findall(raw)), 2)
+        self.assertEqual(len(PAT.case_star.findall(raw)), 1)
 
     def test_별표_개수_불일치는_FAIL(self):
         self._write("판시 (91다43695*) 이다.\n")

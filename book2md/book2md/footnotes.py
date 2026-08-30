@@ -203,9 +203,12 @@ class FootnoteCollector:
             for n in numbers:
                 if f"[^{n}]" in text:
                     continue                    # 파서가 위첨자로 이미 살렸다
-                # 위첨자가 본문에 섞여 'NNN)' 또는 'NNN' 으로 떨어진다.
-                # 앞이 문장 끝이나 닫는 괄호일 때만 참조로 본다.
-                pat = re.compile(rf"(?<=[가-힣\)\]』」.])\s?({n})\s*[)）]?(?![\d])")
+                # 위첨자가 본문에 'NNN)' 꼴로 떨어진다. **닫는 괄호를 반드시
+                # 요구한다.** 맨 숫자까지 잡으면 '제38조 1항' 의 1 이 [^1] 이 되고,
+                # '제1심', '2020. 1. 16' 도 줄줄이 망가진다.
+                # 조문·차수 뒤 숫자도 앞글자로 한 번 더 막는다.
+                pat = re.compile(
+                    rf"(?<![조항호제년월일억만차회심장절권편0-9])({n})\s*[)）](?![\d])")
                 out, cursor = [], 0
                 for m in pat.finditer(text):
                     if any(a <= m.start(1) < b for a, b in guard):

@@ -126,6 +126,11 @@ class PyMuPDFParser(Parser):
                     rect.width * margin_ratio, i + 1, sampler)
                 lines = _merge_same_line(lines, opts["merge_overlap"],
                                          rect.width * opts["merge_gap"])
+                if want_sidenote:
+                    lines, more = _pull_sidenote_lines(
+                        lines, side_rx, self.keep_sidenotes,
+                        rect.width * margin_ratio)
+                    sidenotes.extend(more)
                 self._mark_zones(lines, rect.height, body_size, opts)
                 ordered = self._order(lines, rect.width, profile.get("columns", "auto"))
                 yield Page(number=i + 1, lines=ordered, width=rect.width,
@@ -460,6 +465,23 @@ def _running_key(text: str) -> str:
     key = _RUNNING_KEEP.sub("", strip_markup(text or ""))
     key = re.sub(r"\d+", "", key)
     return key if len(key) >= 4 else ""
+
+
+def _pull_sidenote_lines(lines, side_rx, keep: bool, margin_x: float):
+    """줄 전체가 옆번호인 것을 떼어낸다.
+
+    span 이 'sO', '-', '13' 으로 쪼개져 오면 span 단위 검사가 놓친다. 줄로
+    합쳐진 뒤에 한 번 더 본다. 안 떼면 본문에 남아 §4.3 의 사고가 난다.
+    """
+    kept, pulled = [], []
+    for line in lines:
+        text = strip_markup(line.stripped)
+        if side_rx.match(text) and (not keep or line.x0 >= margin_x):
+            if keep:
+                pulled.append({"text": text, "y": line.y0})
+            continue
+        kept.append(line)
+    return kept, pulled
 
 
 def _join_pieces(head: str, tail: str, gap: bool) -> str:

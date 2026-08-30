@@ -79,6 +79,7 @@ class Structurer:
         self._score_rx = re.compile(prof["score"]) if prof.get("score") else None
         self._score_max = float(prof.get("score_max", 50))
         self._last_problem: Block | None = None
+        self._ans_max = int(prof.get("answer_heading_max_len", 40))
         self._prompt = tuple(prof.get("prompt_markers", []))
         self._answer = tuple(prof.get("answer_markers", []))
 
@@ -191,11 +192,16 @@ class Structurer:
             self.blocks.append(self._mk("bold", f"**{label}**{suffix}", page=page_no))
             return
         for level, rx in self._ans_heads:
-            if rx.match(plain) and len(plain) <= 60:
-                self._in_prompt = False
-                score, title = _split_score(self._score_rx, plain, self._score_max)
-                self._heading(level, title, page_no, score=score)
-                return
+            if self._in_prompt or not rx.match(plain):
+                # 문제 지문 안의 '(1) …' 은 설문 번호이지 답안 목차가 아니다.
+                continue
+            score, title = _split_score(self._score_rx, plain, self._score_max)
+            # 배점을 떼고 나서 길이와 마침을 본다. '2. 일부청구 소송물 (2.5)' 는
+            # 배점 괄호 때문에 문장처럼 보이지만 제목이다.
+            if len(title) > self._ans_max or _SENT_END.search(title):
+                continue
+            self._heading(level, title, page_no, score=score)
+            return
         self._paragraph(text, page_no)
 
     # ── 공통 ────────────────────────────────────────────────────

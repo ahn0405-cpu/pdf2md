@@ -89,7 +89,7 @@ class Pipeline:
                 stars = cases = mnem = 0
                 for i in idx:
                     text = doc[i].get_text("text")
-                    stars += len(self.pat.case_star.findall(text))
+                    stars += len(self.pat.case_star_loose.findall(text))
                     cases += len(self.pat.case_loose.findall(text))
                     mnem += len(self.pat.find_mnemonics(text))
                 base.update(stars=stars, cases=cases, mnemonics=mnem,
