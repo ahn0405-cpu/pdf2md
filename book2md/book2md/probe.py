@@ -375,12 +375,18 @@ def lines(pdf_path: str, cfg: dict, prof: dict, pages) -> str:
     return "\n".join(L) + "\n"
 
 
-def color(pdf_path: str, cfg: dict, number: int) -> str:
+def _pct(part, whole) -> str:
+    return f"{(100.0 * part / whole):.1f}%" if whole else "-"
+
+
+def color(pdf_path: str, cfg: dict, number: int, image=None) -> str:
     """한 쪽의 낱말마다 유채색 비율을 잰다 (§P0-2 임계값 정하기).
 
     강조가 덜 잡히는지 더 잡히는지는 **비율 분포**를 봐야 안다. 문턱을 짐작으로
-    올리고 내리면 한쪽을 고칠 때마다 다른 쪽이 깨진다. 이 표를 보고
-    `preserve.color.min_ratio` 와 `min_ratio_weak` 를 정한다.
+    올리고 내리면 한쪽을 고칠 때마다 다른 쪽이 깨진다.
+
+    쪽 전체의 유채색 화소도 함께 센다. 글자 상자 안에서 찾은 것이 쪽 전체보다
+    한참 적으면 **상자가 잉크와 어긋난 것**이다. 그때는 문턱을 내려도 소용없다.
     """
     import pymupdf
 
@@ -391,11 +397,12 @@ def color(pdf_path: str, cfg: dict, number: int) -> str:
     gap = float(cfg.get("extract", {}).get("space_gap_ratio", 0.18))
     doc = pymupdf.open(pdf_path)
     if not (1 <= number <= doc.page_count):
+        doc.close()
         return f"{number} 쪽이 없다 (전체 {doc.page_count}쪽)."
     page = doc[number - 1]
     sampler = ImageColorSampler(page, color_cfg)
 
-    rows = []
+    rows, boxes = [], []
     for block in page.get_text("rawdict")["blocks"]:
         if block.get("type") != 0:
             continue
@@ -409,12 +416,22 @@ def color(pdf_path: str, cfg: dict, number: int) -> str:
                     if box is None or not seg.strip():
                         continue
                     hexed, ratio, weak = sampler.classify(box)
+                    verdict = "강조" if hexed else ("애매" if weak else "본문")
                     rows.append((ratio, seg.strip(), hexed or weak or "-",
-                                 round(box[1], 1),
-                                 "강조" if hexed else ("애매" if weak else "본문")))
-    doc.close()
+                                 round(box[1], 1), verdict))
+                    boxes.append((box, verdict))
     if not rows:
+        doc.close()
         return f"{number} 쪽에서 글자를 못 찾았다."
+
+    ink_all, chroma_all = sampler.totals()
+    seen: dict[str, set] = {"강조": set(), "애매": set(), "본문": set()}
+    for box, verdict in boxes:
+        seen[verdict] |= sampler.cells_in(box)
+    seen["애매"] -= seen["강조"]
+    seen["본문"] -= seen["강조"] | seen["애매"]
+    got = {k: sampler.chroma_of(v) for k, v in seen.items()}
+    outside = chroma_all - sum(got.values())
 
     strong = sum(1 for r in rows if r[4] == "강조")
     weakn = sum(1 for r in rows if r[4] == "애매")
@@ -426,7 +443,32 @@ def color(pdf_path: str, cfg: dict, number: int) -> str:
          f"`chroma_min` {sampler.chroma_min} · `grid_cell` {sampler.CELL}",
          f"- 렌더 해상도 {sampler.dpi} dpi", ""]
 
-    bands = [0.0, 0.05, 0.10, 0.15, 0.20, 0.30, 0.45, 0.65, 1.01]
+    L.append("## 색 화소 회계 — **여기부터 볼 것**")
+    L.append("")
+    L.append("쪽 전체의 유채색 화소가 어디로 갔는지 센다. 글자 상자와 무관하게 "
+             "먼저 세고, 그다음 어느 상자 안에 들어가는지 본다.")
+    L.append("")
+    L.append("| 어디 | 유채색 화소 | 비율 |")
+    L.append("|---|---:|---:|")
+    L.append(f"| 쪽 전체 잉크 | {ink_all:,} | - |")
+    L.append(f"| 쪽 전체 유채색 | {chroma_all:,} | {_pct(chroma_all, ink_all)} |")
+    for k in ("강조", "애매", "본문"):
+        L.append(f"| └ `{k}` 로 판정한 낱말 안 | {got[k]:,} | "
+                 f"{_pct(got[k], chroma_all)} |")
+    L.append(f"| └ 어느 낱말 상자에도 없음 | {outside:,} | "
+             f"{_pct(outside, chroma_all)} |")
+    L.append("")
+    L.append("**읽는 법**")
+    L.append("")
+    L.append("- `본문` 칸이 크다 → 파란 잉크가 낱말 상자 **안에는 있는데** 비율이")
+    L.append("  문턱을 못 넘었다. `min_ratio` 를 내리면 잡힌다.")
+    L.append("- `어느 낱말 상자에도 없음` 이 크다 → **상자가 잉크와 어긋났다.**")
+    L.append("  문턱을 내려도 소용없다. 파서를 바꾸거나 상자를 넓혀야 한다.")
+    L.append("- 둘 다 작고 `강조` 가 대부분이다 → 지금 판정이 맞다. 원본에 색이")
+    L.append("  그만큼밖에 없는 것이다.")
+    L.append("")
+
+    bands = [0.0, 0.02, 0.05, 0.10, 0.15, 0.20, 0.30, 0.45, 0.65, 1.01]
     L.append("## 비율 분포")
     L.append("")
     L.append("| 구간 | 낱말 수 | |")
@@ -435,28 +477,39 @@ def color(pdf_path: str, cfg: dict, number: int) -> str:
         n = sum(1 for r in rows if lo <= r[0] < hi)
         L.append(f"| {lo:.2f} ~ {hi:.2f} | {n} | {'█' * min(60, n)} |")
     L.append("")
-    L.append("> 색칠된 낱말과 검정 낱말은 두 봉우리로 갈린다. **골짜기**에 문턱을")
-    L.append("> 놓는다. 골짜기가 안 보이면 `chroma_min` 을 낮추거나 `image_dpi` 를")
-    L.append("> 올려야 한다 — 아직 색과 검정이 안 갈린 것이다.")
-    L.append("")
 
-    L.append("## 비율이 높은 낱말 (강조여야 한다)")
+    L.append("## 비율이 높은 낱말")
     L.append("")
     L.append("| 비율 | 판정 | 색 | y | 낱말 |")
     L.append("|---:|---|---|---:|---|")
-    for ratio, seg, hexed, y, verdict in sorted(rows, reverse=True)[:60]:
+    for ratio, seg, hexed, y, verdict in sorted(rows, reverse=True)[:40]:
         L.append(f"| {ratio:.3f} | {verdict} | `{hexed}` | {y} | {seg[:30]} |")
     L.append("")
 
-    middle = sorted((r for r in rows if 0.02 <= r[0] < sampler.min_ratio),
-                    reverse=True)
-    L.append("## 문턱 바로 아래 낱말 (놓치고 있는지 볼 것)")
+    middle = sorted((r for r in rows if 0 < r[0] < sampler.min_ratio), reverse=True)
+    L.append("## 문턱 아래인데 색이 조금이라도 있는 낱말")
+    L.append("")
+    L.append(f"{len(middle)}개. 여기에 **원본에서 파란 낱말**이 섞여 있으면 "
+             f"`min_ratio` 를 그 아래로 내린다.")
     L.append("")
     L.append("| 비율 | 판정 | 색 | y | 낱말 |")
     L.append("|---:|---|---|---:|---|")
-    for ratio, seg, hexed, y, verdict in middle[:60]:
+    for ratio, seg, hexed, y, verdict in middle[:40]:
         L.append(f"| {ratio:.3f} | {verdict} | `{hexed}` | {y} | {seg[:30]} |")
     L.append("")
-    L.append("이 표에 **원본에서 파란 낱말**이 섞여 있으면 `min_ratio` 를 그 아래로")
-    L.append("내린다. 검정 낱말만 있으면 지금 문턱이 맞다.")
+
+    if image:
+        from pathlib import Path
+        for box, verdict in boxes:
+            col = {"강조": (0, 0.55, 0), "애매": (0.9, 0.5, 0)}.get(verdict)
+            if col:
+                page.draw_rect(pymupdf.Rect(*box), color=col, width=0.7)
+        page.get_pixmap(dpi=int(color_cfg.get("image_dpi_max", 200))).save(str(image))
+        L.append(f"## 그림")
+        L.append("")
+        L.append(f"`{image}` — 초록 네모가 **강조**, 주황이 **애매** 로 판정한 "
+                 f"낱말이다. 원본에서 파란 글자와 견줄 것. 네모가 글자에서 "
+                 f"어긋나 있으면 상자 문제다.")
+        L.append("")
+    doc.close()
     return "\n".join(L) + "\n"

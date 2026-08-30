@@ -326,24 +326,31 @@ class PyMuPDFParser(Parser):
 
     # ── 머리말·각주 영역 ─────────────────────────────────────────
     def _mark_zones(self, lines, height, body_size, opts):
-        """각주 영역은 아래에서 위로 올라가며 잡는다.
+        """머리말·꼬리말·각주 영역을 가른다.
 
-        본문 크기 줄을 만나면 거기서 끊는다. 그래야 본문 마지막 문단을
-        각주로 잘못 삼키지 않는다.
+        **읽는 순서(y)로 세워 놓고** 본다. rawdict 가 주는 차례는 조판 순서라
+        위아래가 뒤섞여 있다. 그대로 아래에서 위로 훑으면 엉뚱한 줄을 각주
+        첫 줄로 잡는다.
         """
         if not lines:
             return
+        ordered = sorted(lines, key=lambda l: (round(l.y0, 1), l.x0))
         running = opts.get("running") or set()
         zone = float(opts.get("repeat_zone", 0.12))
         small = body_size * opts["size_ratio"]
         band_len = int(opts.get("band_max_len", 40))
-        for line in lines:
+        edge = {id(ordered[0]), id(ordered[-1])}
+
+        for line in ordered:
             if line.y1 <= height * opts["header_zone"]:
                 line.zone = "header"
                 continue
-            # 위·아래 띠. 장 제목 띠는 책마다 위에 오기도 하고 아래 오기도 한다.
-            # 아래만 보면 'O과 nr CHAPTER 6 소송절차 개시' 가 본문에 남는다.
-            in_band = line.y1 <= height * zone or line.y0 >= height * (1 - zone)
+            # 위·아래 띠, 그리고 쪽의 첫 줄·끝 줄. 장 제목 띠는 책마다 위에
+            # 오기도 하고 아래 오기도 하며, 여백이 넉넉한 쪽에서는 띠를
+            # 벗어나 앉는다. 자리(첫 줄·끝 줄)로도 함께 본다.
+            in_band = (line.y1 <= height * zone
+                       or line.y0 >= height * (1 - zone)
+                       or id(line) in edge)
             if not in_band:
                 continue
             plain = strip_markup(line.stripped)
@@ -359,10 +366,9 @@ class PyMuPDFParser(Parser):
                 line.zone = "header"
 
         limit = height * (1.0 - opts["bottom_zone"])
-        small = body_size * opts["size_ratio"]
         start = None
-        for k in range(len(lines) - 1, -1, -1):
-            line = lines[k]
+        for k in range(len(ordered) - 1, -1, -1):
+            line = ordered[k]
             if line.zone == "header":
                 continue            # 꼬리말은 건너뛴다. 여기서 멈추면 각주를 통째로 놓친다
             if line.y0 < limit or line.size >= small:
@@ -370,12 +376,12 @@ class PyMuPDFParser(Parser):
             start = k
         if start is None:
             return
-        start = self._strip_tail_footer(lines, start, height, opts)
+        start = self._strip_tail_footer(ordered, start, height, opts)
         if start is None:
             return
-        if not re.match(r"^\d{1,4}\b", strip_markup(lines[start].stripped)):
+        if not re.match(r"^\d{1,4}\b", strip_markup(ordered[start].stripped)):
             return          # 번호로 시작하지 않으면 각주가 아니다
-        for line in lines[start:]:
+        for line in ordered[start:]:
             if line.zone != "header":
                 line.zone = "footnote"
 

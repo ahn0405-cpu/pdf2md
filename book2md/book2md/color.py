@@ -235,6 +235,36 @@ class ImageColorSampler:
                     bsum[k] += b
         self._grid = (ink, chroma, rsum, gsum, bsum)
 
+    # ── 쪽 전체 회계 ─────────────────────────────────────────────
+    def totals(self) -> tuple[int, int]:
+        """쪽 전체의 (잉크 화소, 유채색 화소).
+
+        글자 상자와 무관하게 센다. 상자 안에서 찾은 유채색이 이보다 한참
+        적으면 **상자가 잉크와 어긋난 것**이다. 문턱을 내려 봐야 소용없다.
+        """
+        if self._grid is None:
+            self._build()
+        ink_g, chroma_g = self._grid[0], self._grid[1]
+        return sum(ink_g), sum(chroma_g)
+
+    def cells_in(self, bbox) -> set:
+        """글자 상자가 덮는 격자 칸 번호."""
+        if self._grid is None:
+            self._build()
+        c0 = max(0, int(bbox[0] / self.CELL))
+        c1 = min(self.cols - 1, int(bbox[2] / self.CELL))
+        r0 = max(0, int(bbox[1] / self.CELL))
+        r1 = min(self.rows - 1, int(bbox[3] / self.CELL))
+        return {row * self.cols + col
+                for row in range(r0, r1 + 1) for col in range(c0, c1 + 1)}
+
+    def chroma_of(self, cells) -> int:
+        """이 칸들 안의 유채색 화소 수."""
+        if self._grid is None:
+            self._build()
+        chroma_g = self._grid[1]
+        return sum(chroma_g[k] for k in cells)
+
     # ── 글자 상자 하나 ───────────────────────────────────────────
     def classify(self, bbox) -> tuple[str | None, float, str | None]:
         """(확실한 대표색 또는 None, 유채색 비율, 애매한 대표색 또는 None).
