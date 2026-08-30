@@ -531,3 +531,81 @@ def validate(doc: dict) -> tuple[list, list]:
                 warns.append(f"M4 문제 {pid} 의 배점 합계 {part:g} 가 "
                              f"총점 {float(total):g} 과 다르다 — 어딘가 잘못 읽었다")
     return fails, warns
+
+
+# ── 진단 ────────────────────────────────────────────────────────
+def debug_report(data: dict, sample: int = 40) -> str:
+    """왜 이렇게 판정됐는지 사람이 볼 수 있게 늘어놓는다.
+
+    점수가 낮게 나올 때 어느 근거가 안 걸리는지를 짐작하지 않기 위한 것이다.
+    셋 중 무엇이 몇 번 걸렸는지, 제목 키워드가 어떻게 잘렸는지, 짝을 못 찾은
+    문제가 무엇인지를 그대로 보여준다.
+    """
+    sections, problems = data["sections"], data["problems"]
+    matches = data["matches"]
+    flat = [m for ms in matches.values() for m in ms]
+
+    L = ["# 매핑 진단", "",
+         f"기본서 md {len(data['files']['textbook'])}개 → 절 {len(sections)}개",
+         f"사례집 md {len(data['files']['casebook'])}개 → 문제 {len(problems)}개",
+         f"짝 후보 {len(flat)}쌍", ""]
+
+    # 점수 분포
+    L += ["## 점수 분포", "", "| score | 쌍 | 절 |", "|---:|---:|---:|"]
+    for s in (3, 2, 1):
+        pairs = sum(1 for m in flat if m.score == s)
+        secs = sum(1 for ms in matches.values() if max(x.score for x in ms) == s)
+        L.append(f"| {s} | {pairs} | {secs} |")
+    L.append("")
+
+    # 근거 조합
+    L += ["## 어느 근거가 걸렸나", "",
+          "| 제목키워드 | 사건번호 | 두문자 | 쌍 |", "|---|---|---|---:|"]
+    combo: dict = {}
+    for m in flat:
+        key = (bool(m.keywords), bool(m.cases), bool(m.mnemonics or m.near))
+        combo[key] = combo.get(key, 0) + 1
+    for key in sorted(combo, key=lambda k: -combo[k]):
+        L.append("| " + " | ".join("○" if x else "·" for x in key)
+                 + f" | {combo[key]} |")
+    L.append("")
+    L.append(f"제목키워드가 걸린 쌍 {sum(1 for m in flat if m.keywords)} · "
+             f"사건번호 {sum(1 for m in flat if m.cases)} · "
+             f"두문자 {sum(1 for m in flat if m.mnemonics)} · "
+             f"근접 두문자 {sum(1 for m in flat if m.near and not m.mnemonics)}")
+    L.append("")
+
+    # 알맹이가 실려 있나
+    L += ["## 알맹이 집계", "",
+          "| | 사건번호 0건 | 두문자 0건 | 둘 다 0건 |", "|---|---:|---:|---:|"]
+    for name, items in (("기본서 절", sections), ("사례집 문제", problems)):
+        no_c = sum(1 for x in items if not x.cases)
+        no_m = sum(1 for x in items if not x.mnemonics)
+        both = sum(1 for x in items if not x.cases and not x.mnemonics)
+        L.append(f"| {name} {len(items)}개 | {no_c} | {no_m} | {both} |")
+    L.append("")
+
+    # 표본
+    L += [f"## 사례집 문제 표본 (앞 {sample}개)", "",
+          "| id | 제목 | 쪼갠 키워드 | 총점 | 답안 | 사건 | 두문자 |",
+          "|---|---|---|---:|---:|---:|---:|"]
+    for p in problems[:sample]:
+        L.append(f"| `{p.id}` | {p.title} | {' / '.join(p.keywords)} "
+                 f"| {p.points if p.points is not None else '—'} "
+                 f"| {len(p.answers)} | {len(p.cases)} | {len(p.mnemonics)} |")
+    L += ["", f"## 기본서 절 표본 (앞 {sample}개)", "",
+          "| 장 | 절 | 알맹이 | 사건 | 두문자 |", "|---|---|---|---:|---:|"]
+    for s in sections[:sample]:
+        L.append(f"| {s.chapter} | {s.title} | {s.name} "
+                 f"| {len(s.cases)} | {len(s.mnemonics)} |")
+
+    # 짝 없는 문제 — 여기가 제일 중요하다
+    left = [p for p in problems if p.id not in data["used"]]
+    L += ["", f"## 근거 2개 이상으로 붙지 못한 사례집 문제 {len(left)}개", ""]
+    for p in left:
+        best = max((m for m in flat if m.prob.id == p.id),
+                   key=lambda m: m.score, default=None)
+        why = ("아무 절에도 안 걸림" if best is None else
+               f"최선 {best.section.title} (score {best.score})")
+        L.append(f"- `{p.id}` {p.title} — {why}")
+    return "\n".join(L) + "\n"

@@ -109,6 +109,8 @@ def main(argv=None) -> int:
                     help="변환 결과 폴더. 출력 루트 하나만 줘도 된다 — "
                          "기본서·사례집은 프론트매터 source: 로 가른다")
     mb.add_argument("-o", "--out", default="mapping.yaml")
+    mb.add_argument("--report", nargs="?", const="mapping_debug.md",
+                    help="왜 그렇게 판정했는지 진단을 함께 쓴다")
     mr = msub.add_parser("review", help="승인 대기 목록")
     mr.add_argument("path", nargs="?", default="mapping.yaml")
     mr.add_argument("--out", help="파일로 저장 (기본: 화면)")
@@ -162,6 +164,10 @@ def _map_build(args, cfg) -> int:
     if files["other"]:
         print(f"※ source: 를 알아볼 수 없어 건너뛴 파일 {len(files['other'])}개")
     print(f"매핑 {strong}건 · 후보 {weak}건 → {out}")
+    if args.report:
+        rp = Path(args.report)
+        rp.write_text(map_mod.debug_report(data), encoding="utf-8")
+        print(f"진단 → {rp}")
     print("**아직 하나도 승인되지 않았다.** `mapping review` 로 보고 "
           "`mapping confirm` 으로 승인할 것.")
     return 0
