@@ -22,6 +22,8 @@ _LIST_HEAD = re.compile(
 _SENT_END = re.compile(r"(?:[.?!]|다\.|음\.|함\.|[」』’”\)])\s*$")
 _CJK = re.compile(r"[가-힣ㄱ-ㅎㅏ-ㅣ぀-ヿ一-鿿]")
 _NUM_ITEM = re.compile(r"^(\d{1,2})\s*\.\s*")
+#: 색으로 감싼 제목 뒤에 본문이 바로 이어지는 줄 (§6.1)
+_RUNIN = re.compile(r"^(?P<mark>==|\*\*)(?P<head>[^=*\n]{2,60}?)(?P=mark)\s+(?P<rest>\S.*)$")
 
 
 @dataclass
@@ -135,6 +137,15 @@ class Structurer:
 
     # ── 기본서 (§6.1) ────────────────────────────────────────────
     def _feed_textbook(self, text: str, plain: str, line, page_no: int) -> None:
+        # 제목과 본문이 한 줄에 붙어 있는 자리 (§6.1). 저자가 제목만 색으로
+        # 칠해 두었으므로 색이 경계를 알려 준다. 이걸 안 가르면 문단 전체가
+        # 제목이 되거나, 길이 때문에 제목이 통째로 본문에 묻힌다.
+        split = self._runin(text, plain)
+        if split:
+            head_text, head_plain, rest = split
+            self._feed_textbook(head_text, head_plain, line, page_no)
+            self._paragraph(rest, page_no)
+            return
         for level, rx in self._heads:
             if rx.match(plain):
                 self._heading(level, plain, page_no, y=getattr(line, "y0", None))
@@ -254,6 +265,26 @@ class Structurer:
         if dist is not None and dist <= self._side_tol:
             return self._sidenotes.pop(best)["text"]
         return None
+
+    def _runin(self, text: str, plain: str):
+        """'==I. 의의 및 취지== 당사자와 …' 을 (제목, 나머지) 로 가른다.
+
+        색으로 감싼 앞부분이 제목 무늬에 맞고 뒤에 본문이 이어질 때만 가른다.
+        색이 없으면 가르지 않는다 — 어디까지가 제목인지 알 길이 없고,
+        찍어서 자르면 제목이 잘려 나간다.
+        """
+        m = _RUNIN.match(text)
+        if not m:
+            return None
+        head, rest = m.group("head").strip(), m.group("rest").strip()
+        if not head or len(rest) < int(self.prof.get("runin_min_rest", 20)):
+            return None
+        head_plain = _strip_markup(head)
+        if len(head_plain) > int(self.prof.get("section_max_len", 40)):
+            return None
+        if not any(rx.match(head_plain) for _, rx in self._heads):
+            return None
+        return m.group("mark") + head + m.group("mark"), head_plain, rest
 
     def _paragraph(self, text: str, page_no: int) -> None:
         new = bool(_LIST_HEAD.match(text)) or not self._para or _SENT_END.search(self._para[-1])

@@ -28,13 +28,12 @@ def _collect(root: Path, pat: Patterns):
     problems: set[str] = set()
     for path in md_files(root):
         text = path.read_text(encoding="utf-8")
-        for m in pat.mnemonic.finditer(text):
-            body = m.group("body")
-            if not pat.is_mnemonic_body(body):
-                continue
+        # mnemonic_spans 를 쓴다. 정규식만 돌리면 ③ 판례 제목 라벨('[일반]',
+        # '[소권남용]', '[원칙]')이 두문자로 섞여 결정표가 못 쓰게 된다.
+        for start, end, body in pat.mnemonic_spans(text):
             counts[body] += 1
             context.setdefault(body, []).append(
-                f"{path.name}: …{text[max(0, m.start() - 28):m.end() + 28]}…"
+                f"{path.name}: …{text[max(0, start - 28):end + 28]}…"
                 .replace("\n", "⏎"))
         for m in _SIDE.finditer(text):
             sides[m.group(0)] += 1

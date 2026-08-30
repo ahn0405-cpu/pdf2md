@@ -20,9 +20,23 @@ from .patterns import Patterns
 
 #: 줄 맨 앞의 로마자 절 번호. 앞에 강조 표시가 붙어 있을 수 있다.
 #: 뒤에는 '.'(또는 공백)과 한글 제목이 와야 한다.
-_ROMAN_HEAD = re.compile(
-    r"^(?:[=*]{2})?\s*(?P<num>[IVXlN|Ⅰ-Ⅹ¡ν씨０-９0-9]{1,5})"
-    r"(?:\s*[.,·]\s*|\s+)(?=[가-힣])")
+def _roman_head_rx(table: dict) -> re.Pattern:
+    """줄 맨 앞의 로마자 절 번호를 잡는 정규식.
+
+    글자 목록은 config 의 roman_heads 에서 그대로 뽑는다. 표에 새 오인식을
+    적어 넣었는데 정규식이 못 받으면 아무 일도 안 일어난다 — 둘이 어긋나는
+    것이 이 자리에서 가장 흔한 사고다.
+    """
+    chars = set("IVX")
+    for raw in table:
+        chars.update(raw)
+    # 구분점은 번호에 들어갈 수 없다. 표에 'IV.' 같은 것이 섞여 있으면 '.' 이
+    # 번호 글자로 새어 들어가 '।.' 을 통째로 번호로 삼고 표에서 못 찾는다.
+    chars -= set(".,·  \t")
+    cls = "".join(sorted(chars))
+    return re.compile(
+        rf"^(?:[=*]{{2}})?\s*(?P<num>[{re.escape(cls)}]{{1,5}})"
+        rf"(?:\s*[.,·]\s*|\s+)(?=[가-힣])")
 
 #: 제N죄/제N좌 → 제N조 (조문번호 안에서만)
 _ARTICLE_OCR = re.compile(r"제\s*(\d+)\s*[죄좌](?![가-힣])")
@@ -70,6 +84,7 @@ class Normalizer:
         self.item_space = bool(n.get("item_number_space", True))
         self.head_space = bool(n.get("heading_number_space", True))
         self.roman = _roman_table(n.get("roman_heads", {}))
+        self.roman_rx = _roman_head_rx(self.roman)
         self.article_ocr = bool(n.get("article_ocr", True))
         self.title_brackets = bool(n.get("repair_title_brackets", True))
         self.close_alt = "".join(c for c in self.closes if c not in "])}")
@@ -286,7 +301,7 @@ class Normalizer:
         """
         if not self.roman:
             return text
-        m = _ROMAN_HEAD.match(text)
+        m = self.roman_rx.match(text)
         if not m:
             return text
         raw = m.group("num")

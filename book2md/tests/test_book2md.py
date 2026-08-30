@@ -702,7 +702,10 @@ class 스캔본(unittest.TestCase):
         # 하나도 안 맞는다 — 각주와 떨어진 세로 간격으로만 가른다 (§4.1).
         self.assertNotIn("己厂", md)
         self.assertNotIn("소송절차 개시", md)
-        # §P0-1 로마자가 소문자 L 로 흘러나와도 헤딩으로 선다
+        # §P0-1 로마자가 딴 글자로 흘러나와도, 제목과 본문이 한 줄에 붙어
+        # 있어도 헤딩으로 선다
+        self.assertIn("#### I. 의의", md)
+        self.assertIn("\n수량적 가분 채권을 분할 청구하는 것을 말한다.", md)
         self.assertIn("#### II. 소송물", md)
         self.assertIn("#### III. 기판력", md)
         self.assertIn('"II. 소송물"', md)          # sections 에도 있다
@@ -739,8 +742,8 @@ class 스캔본(unittest.TestCase):
         self.assertEqual(verdict, "FAIL")
         warn = (out / "_reports" / "warnings.md").read_text(encoding="utf-8")
         self.assertIn("목차에 있는데 헤딩이 없다", warn)
-        self.assertIn("소송물", warn)
-        self.assertIn("절 번호가 I → IV 로 건너뛴다", warn)
+        for lost in ("의의", "소송물", "기판력"):
+            self.assertIn(lost, warn)
 
     def test_지난_결과물을_지우고_쓴다(self):
         """옛 파일이 남으면 검증이 같은 내용을 두 번 세어 별표가 2배가 된다."""
@@ -924,6 +927,62 @@ class 꼬리말_세로간격(unittest.TestCase):
         ])
         PyMuPDFParser._strip_tail_footer(lines, 0, 700, opts)
         self.assertEqual([l.zone for l in lines], ["body"] * 3)
+
+
+
+class 달림제목(unittest.TestCase):
+    """§6.1 — 제목과 본문이 한 줄에 붙어 있을 때"""
+
+    def _render(self, lines):
+        from book2md.structure import Structurer, render
+        from book2md.model import Line, Page
+        prof = dict(get_profile(CFG, "textbook"))
+        prof["_config"] = CFG
+        st = Structurer(CFG, prof, PAT)
+        st.feed(Page(number=1, lines=[Line(text=t, size=10) for t in lines]), [])
+        return render(st.finish())
+
+    def test_색이_제목의_끝을_알려_준다(self):
+        out = self._render([
+            "==I. 의의 및 취지== 당사자와 소송관계인은 신의에 따라 성실하게 "
+            "소송을 수행하여야 한다(제1조 제2항)."])
+        self.assertIn("#### I. 의의 및 취지", out)
+        self.assertIn("당사자와 소송관계인은", out.split("#### I. 의의 및 취지")[1])
+
+    def test_색이_없으면_가르지_않는다(self):
+        """어디까지가 제목인지 알 길이 없다. 찍어서 자르면 제목이 잘린다."""
+        out = self._render([
+            "I. 의의 및 취지 당사자와 소송관계인은 신의에 따라 성실하게 "
+            "소송을 수행하여야 한다(제1조 제2항)."])
+        self.assertNotIn("당사자와 소송관계인은 신의에 따라 성실하게 "
+                         "소송을 수행하여야 한다(제1조 제2항).\n\n", out.split("\n")[0])
+
+    def test_색이_있어도_제목_무늬가_아니면_그냥_둔다(self):
+        out = self._render(["==확장의 뜻을 밝힌 때에는== 전부에 미친다고 본다."])
+        self.assertNotIn("####", out)
+
+
+class 조문번호_두문자_가르기(unittest.TestCase):
+    """§P1-2 — 실물에서 새어 들어온 꼴들"""
+
+    def test_조문은_두문자가_아니다(self):
+        for body in ("제259조", "제218죄", "민법 제272조", "민법 제406조",
+                     "제343조 후단", "제402", "제62", "동조 2항", "제1조 2항"):
+            self.assertFalse(PAT.is_mnemonic_body(body), body)
+
+    def test_두문자는_그대로_둔다(self):
+        for body in ("일나시 나소시", "확객시전", "꾀유상이", "명일동내",
+                     "부원공 어패다기"):
+            self.assertTrue(PAT.is_mnemonic_body(body), body)
+
+    def test_판례_라벨은_자리로_가른다(self):
+        # 정규식만 돌리면 '[일반]' '[소권남용]' 이 두문자로 섞여 결정표가 못 쓰게 된다
+        for text in ("1) [일반적 판단기준] 실효기간의 길이와 …",
+                     "i) [일반] 일부청구임을 명시한 사건에서 …",
+                     "ii) [소권남용] 이 사건 소송이 일부청구인 …"):
+            self.assertEqual(PAT.find_mnemonics(text), [], text)
+        self.assertEqual(PAT.find_mnemonics("(1) 의의 `[꾀유상이]` 잔꾀를 써서"),
+                         ["꾀유상이"])
 
 
 if __name__ == "__main__":
