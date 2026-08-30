@@ -139,6 +139,10 @@ class Normalizer:
         text = self._noise(text, page_no, changes)
         text = self._case_seps(text, page_no, changes)
         text = self._cases(text, page_no, changes)
+        # 정정을 한 번 더 돌린다. 원문에 '201다 84298' 처럼 공백이 끼어 있으면
+        # 앞의 정정이 못 만난다 — 그 공백은 방금 _cases 가 없앴다. 정정은
+        # 글자열 치환이라 두 번 돌아도 같은 자리를 두 번 고치지 않는다.
+        text = self._corrections(text, page_no, changes)
         text = self._roman_head(text, page_no, changes)
         text = self._articles(text)
         if self.article_ocr:

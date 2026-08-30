@@ -1071,6 +1071,13 @@ class 사람이_확정한_정정(unittest.TestCase):
         m = PAT.case.search(got)
         self.assertEqual(PAT.case_problems(m), [])
 
+        # 원문에 공백이 끼어 있어도 만난다. 그 공백은 정정보다 나중에 없어지므로
+        # 정정을 정규화 뒤에 한 번 더 돌린다.
+        for spaced in ("반한다＜201다 84298).", "반한다＜201 다84298)."):
+            self.assertIn("(2011다84298)", norm(spaced))
+        # 두 번 돌아도 같은 자리를 두 번 고치지 않는다
+        self.assertIn("(2011다84298)", norm("반한다(2011다84298)."))
+
         got = norm("그 사실을 다툰 것으로 볼 수 없다189다카4045).")
         self.assertIn("(89다카4045)", got)
         m = PAT.case.search(got)
