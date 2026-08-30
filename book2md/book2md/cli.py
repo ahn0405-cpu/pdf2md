@@ -32,7 +32,7 @@ def main(argv=None) -> int:
     sub = ap.add_subparsers(dest="cmd", required=True)
 
     d = sub.add_parser("diagnose", help="사전 진단 (§3.1). 변환 전 반드시 먼저.")
-    d.add_argument("pdf")
+    d.add_argument("pdf", help="PDF 파일, 또는 PDF 가 든 폴더(안의 PDF 를 모두 진단)")
     d.add_argument("--out", default="output", help="출력 루트 (기본 output)")
     d.add_argument("--sample", type=int, default=24, help="표본 쪽수 (기본 24)")
     d.add_argument("--layout-pages", type=int, default=3,
@@ -68,32 +68,84 @@ def main(argv=None) -> int:
 
 # ── diagnose ────────────────────────────────────────────────────
 def _cmd_diagnose(args, cfg) -> int:
-    pdf = Path(args.pdf)
-    if not pdf.exists():
-        print(f"파일이 없다: {pdf}", file=sys.stderr)
+    target = Path(args.pdf)
+    if not target.exists():
+        print(f"경로가 없다: {target}", file=sys.stderr)
         return 2
+    pdfs = sorted(target.glob("*.pdf")) if target.is_dir() else [target]
+    if not pdfs:
+        print(f"폴더에 PDF 가 없다: {target}", file=sys.stderr)
+        return 2
+
     reports = Path(args.out) / "_reports"
-    print(f"[진단] {pdf} …")
-    d = diag_mod.run(str(pdf), cfg, sample=args.sample,
-                     layout_pages=args.layout_pages,
-                     layout_range=_page_range(getattr(args, "pages", None)))
-    d["profile_hint"] = _guess_profile(d, cfg)
-    md, js = diag_mod.save(d, cfg, reports)
-    print(diag_mod.report(d, cfg))
-    print(f"→ {md}\n→ {js}")
-    if not d["text_layer"]:
-        print("\n※ 텍스트 레이어가 없다. OCR 파서로 가야 한다 (§3.2).")
-    return 0
+    index, rc = [], 0
+    for pdf in pdfs:
+        print(f"[진단] {pdf} …")
+        try:
+            d = diag_mod.run(str(pdf), cfg, sample=args.sample,
+                             layout_pages=args.layout_pages,
+                             layout_range=_page_range(getattr(args, "pages", None)))
+        except Exception as exc:
+            print(f"  ! 읽지 못했다: {exc}", file=sys.stderr)
+            rc = 2
+            continue
+        d["profile_hint"] = _guess_profile(d, cfg)
+        md, js = diag_mod.save(d, cfg, reports)
+        if len(pdfs) == 1:
+            print(diag_mod.report(d, cfg))
+        else:
+            print(f"  {d['pages']:,}쪽 · "
+                  f"{'텍스트' if d['text_layer'] else '스캔'} · {d['columns']}단 · "
+                  f"색 {d['color']['distinct_colors']}종 · "
+                  f"옆번호 {d['sidenote']['found']}건 · "
+                  f"권장 프로파일 {d['profile_hint']}")
+        print(f"  → {md}")
+        index.append(d)
+        if not d["text_layer"]:
+            print("  ※ 텍스트 레이어가 없다. OCR 파서로 가야 한다 (§3.2).")
+
+    if len(index) > 1:
+        path = reports / "diagnosis-index.md"
+        path.write_text(_index_report(index), encoding="utf-8")
+        print(f"\n요약 → {path}")
+    return rc
+
+
+def _index_report(items) -> str:
+    """여러 PDF 를 한꺼번에 진단했을 때의 한눈 표."""
+    L = ["# 진단 요약 (§3.1)", "",
+         "| 파일 | 크기 | 쪽 | 레이어 | 단 | 색 | 옆번호 | 별표 | 두문자 | 권장 프로파일 |",
+         "|---|---:|---:|---|---:|---:|---:|---:|---:|---|"]
+    for d in items:
+        import os
+        L.append(
+            f"| `{os.path.basename(d['file'])}` "
+            f"| {d['size_bytes'] / 1024 / 1024:.0f} MB "
+            f"| {d['pages']:,} "
+            f"| {'텍스트' if d['text_layer'] else '**스캔**'} "
+            f"| {d['columns']} "
+            f"| {d['color']['distinct_colors']} "
+            f"| {d['sidenote']['found']} "
+            f"| {d['cases']['stars_in_sample']} "
+            f"| {len(d['mnemonics'])} "
+            f"| `{d['profile_hint']}` |")
+    L += ["", "쪽수·별표·두문자는 **표본 기준**이다. 전수가 아니다.",
+          "파일별 상세는 같은 폴더의 `diagnosis-<파일이름>.md` 를 볼 것."]
+    return "\n".join(L) + "\n"
 
 
 def _guess_profile(d: dict, cfg: dict) -> str:
-    """문제 번호(E-5)가 보이면 사례집으로 본다."""
-    import re
-    joined = " ".join(" ".join(p["cases"]) for p in d["pages_detail"])
-    text_hint = d.get("sidenote", {}).get("found", 0)
-    if text_hint:
+    """어느 프로파일로 볼지 추정한다. 어디까지나 추정이라 리포트에만 쓴다.
+
+    가장 확실한 단서는 문제 번호(`E-5.`)와 옆번호(`sE-8`)다. 둘 다 없으면
+    파일 이름을 본다.
+    """
+    if len(d.get("problem_numbers") or []) >= 2:
+        return "casebook"
+    if d.get("sidenote", {}).get("found", 0):
         return "textbook"
-    return "casebook" if re.search(r"\b[A-Z]-\d+\.", joined) else "textbook"
+    name = Path(d["file"]).name
+    return "casebook" if ("사례" in name or "casebook" in name.lower()) else "textbook"
 
 
 # ── run ─────────────────────────────────────────────────────────

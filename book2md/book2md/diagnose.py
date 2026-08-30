@@ -26,6 +26,7 @@ _SIDE = re.compile(r"s[A-Z]-\d{1,3}")
 _SIDE_MERGED = re.compile(r"s[A-Z]-\d{3,}|s[A-Z]-\d{1,2}\s*\d")
 _EXAM = re.compile(r"\((\d{2})\)")
 _CHECK = re.compile(r"☑")
+_PROBLEM = re.compile(r"^\s*([A-Z])\s*-\s*(\d+)\s*\.", re.M)
 
 
 @dataclass
@@ -65,6 +66,7 @@ def run(pdf_path: str, cfg: dict, sample: int = 24, layout_pages: int = 3,
     mnemonics: Counter = Counter()
     footnote_numbers: list[int] = []
     exam_years: Counter = Counter()
+    problems: Counter = Counter()
     bonus = 0
     sizes: Counter = Counter()
 
@@ -93,6 +95,8 @@ def run(pdf_path: str, cfg: dict, sample: int = 24, layout_pages: int = 3,
         for m in _EXAM.finditer(text):
             exam_years[m.group(1)] += 1
         bonus += len(_CHECK.findall(text))
+        for m in _PROBLEM.finditer(text):
+            problems[f"{m.group(1)}-{m.group(2)}"] += 1
 
     body_size = sizes.most_common(1)[0][0] if sizes else 10.0
 
@@ -154,6 +158,7 @@ def run(pdf_path: str, cfg: dict, sample: int = 24, layout_pages: int = 3,
         },
         "exam_years": exam_years.most_common(10),
         "bonus_boxes_in_sample": bonus,
+        "problem_numbers": problems.most_common(10),
         "pages_detail": [asdict(p) for p in per_page],
     }
     return result
@@ -372,6 +377,9 @@ def report(d: dict, cfg: dict) -> str:
     a(f"- ② 두문자: {len(d['mnemonics'])}종 — " +
       (", ".join(f"`[{m}]`×{c}" for m, c in d["mnemonics"][:6]) or "표본에 없음"))
     a(f"- ⑧ ☑ 보너스 박스: 표본에서 {d['bonus_boxes_in_sample']}건")
+    if d.get("problem_numbers"):
+        a(f"- 사례집 문제 번호: " +
+          ", ".join(f"`{p}`×{c}" for p, c in d["problem_numbers"][:8]))
     a(f"- ⑨ 기출연도 `(nn)`: " +
       (", ".join(f"`({y})`×{c}" for y, c in d["exam_years"][:8]) or "표본에 없음"))
     a("")
