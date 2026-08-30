@@ -1,0 +1,12 @@
+# 필수
+PyYAML>=6.0
+
+# 파서(선택). 진단 결과에 따라 필요한 것만 설치한다. (§3.2)
+#   텍스트 레이어 있음        : pymupdf, pymupdf4llm
+#   텍스트 레이어 + 2단 조판   : mineru  또는 marker-pdf
+#   스캔본                    : paddleocr, paddlepaddle
+PyMuPDF>=1.24
+# pymupdf4llm>=0.0.17
+# marker-pdf>=1.0
+# mineru>=2.0
+# paddleocr>=2.7
