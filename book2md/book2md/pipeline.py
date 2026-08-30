@@ -12,6 +12,7 @@ from pathlib import Path
 
 from . import diagnose as diag_mod
 from .color import Palette, report as palette_report, to_rgb
+from .emphasis import crops as emphasis_crops
 from .footnotes import FootnoteCollector
 from .model import Page, dump_pages, load_pages
 from .normalize import Normalizer
@@ -45,6 +46,53 @@ def _emphasis_by_page(blocks, cfg) -> tuple[dict, list]:
         if any(c.get("standard") for c in (b.cases or [])):
             standard.add(page)
     return emph, sorted(standard)
+
+
+def _removed_report(dropped, changes_path) -> str:
+    """§P2-1 — 버린 줄을 전부 적는다.
+
+    프로그램이 무엇을 버렸는지 사람이 볼 수 없으면, 본문 한 절이 꼬리말로
+    오인돼 사라져도 알 길이 없다. 판정이 맞았는지는 사람이 본다.
+    """
+    L = ["# 버린 줄 (§P2-1)", "",
+         "본문에서 빼기로 판정한 줄을 전부 적는다. **여기 본문이 섞여 있으면**",
+         "`running.*` 또는 `legend.sidenote.pattern` 을 고쳐야 한다.", ""]
+    by_kind: dict[str, list] = {}
+    for page, kind, text in dropped:
+        if text:
+            by_kind.setdefault(kind, []).append((page, text))
+    gone = []
+    try:
+        with open(changes_path, encoding="utf-8") as fh:
+            for row in fh:
+                if not row.strip():
+                    continue
+                ch = json.loads(row)
+                if ch.get("kind") == "drop":
+                    gone.append((ch.get("page", 0), ch.get("before", "")))
+    except FileNotFoundError:
+        pass
+    if gone:
+        by_kind["정규화 뒤 빈 줄"] = gone
+    if not by_kind:
+        L.append("없음")
+    for kind, items in by_kind.items():
+        L.append(f"## {kind} — {len(items)}줄")
+        L.append("")
+        seen: dict[str, int] = {}
+        for _, text in items:
+            seen[text] = seen.get(text, 0) + 1
+        L.append("| 줄 | 횟수 | 처음 나온 쪽 |")
+        L.append("|---|---:|---:|")
+        first = {}
+        for page, text in items:
+            first.setdefault(text, page)
+        for text, n in sorted(seen.items(), key=lambda kv: -kv[1])[:300]:
+            L.append(f"| `{text[:90]}` | {n} | {first[text]} |")
+        if len(seen) > 300:
+            L.append(f"| … 외 {len(seen) - 300}종 | | |")
+        L.append("")
+    return "\n".join(L) + "\n"
 
 
 class Pipeline:
@@ -104,6 +152,8 @@ class Pipeline:
         여기서 드러나야 하기 때문이다.
         """
         base = {"pages": page_count, "source": Path(self.pdf).name,
+                # 리포트가 쪽 그림을 뜨려면 원본을 다시 열어야 한다 (§P1-3)
+                "source_path": str(Path(self.pdf).resolve()),
                 "partial": self.pages is not None}
         try:
             import pymupdf
@@ -142,10 +192,21 @@ class Pipeline:
         collector = FootnoteCollector(self.cfg, self.pat)
         st = Structurer(self.cfg, self.prof, self.pat)
         pages = 0
+        dropped: list[tuple[int, str, str]] = []
         for page in load_pages(self.normalized):
+            # 본문에서 빠지는 줄을 먼저 적어 둔다 (§P2-1). 머리말·꼬리말로 본
+            # 판정이 틀렸다면 본문 한 절이 통째로 사라진 것이라 눈으로 봐야 한다.
+            for line in page.lines:
+                if line.zone == "header":
+                    dropped.append((page.number, "머리말·꼬리말", line.text.strip()))
+            for note in (page.sidenotes or []):
+                if not note.get("kept", True):
+                    dropped.append((page.number, "옆번호", str(note.get("text", ""))))
             found = collector.process(page)
             st.feed(page, found)
             pages += 1
+        (self.reports / "removed_lines.md").write_text(
+            _removed_report(dropped, self.changes), encoding="utf-8")
         blocks = st.finish()
         emph, standard = _emphasis_by_page(blocks, self.cfg)
         self._update_baseline(absorbed=st.absorbed_chars, line_chars=st.seen_chars,
@@ -194,6 +255,7 @@ class Pipeline:
         res = validate(self.out, self.cfg, base)
         for name, text in validation_reports(res, self.cfg).items():
             (self.reports / name).write_text(text, encoding="utf-8")
+        self._emphasis_fallback(res, base)
         # 프론트매터의 validation 값을 실제 판정으로 되쓴다
         for path in self.out.rglob("*.md"):
             text = path.read_text(encoding="utf-8")
@@ -202,6 +264,29 @@ class Pipeline:
         self.log(f"[검증] {res.verdict} (FAIL {res.failed}, WARN {res.warned}) "
                  f"→ {self.reports}")
         return res.verdict
+
+    def _emphasis_fallback(self, res, base) -> None:
+        """§V3 가 얇다고 짚은 쪽의 표준판례 판시를 그림으로 떠 둔다 (§P0-2 폴백).
+
+        색을 못 읽었을 때 전부를 포기하더라도 표준판례만은 확보해야 한다.
+        판정은 하지 않는다 — 사람이 그림을 보고 손으로 표시한다.
+        """
+        if not res.counts.get("emphasis_thin_pages"):
+            return
+        emph = (base or {}).get("emphasis_by_page") or {}
+        need = int(self.cfg["validation"].get("fail_on", {})
+                   .get("emphasis_per_standard_page", 5))
+        thin = [p for p in ((base or {}).get("standard_pages") or [])
+                if emph.get(str(p), 0) < need]
+        try:
+            blocks = self._load_blocks()
+        except FileNotFoundError:
+            return
+        made, index = emphasis_crops(blocks, (base or {}).get("source_path"),
+                                     self.reports / "emphasis_check", self.cfg,
+                                     pages=thin)
+        if made:
+            self.log(f"[강조 폴백] 표준판례 판시 {made}곳을 그림으로 떴다 → {index}")
 
     # ── 전체 ────────────────────────────────────────────────────
     def run(self, start: str = "extract") -> str:

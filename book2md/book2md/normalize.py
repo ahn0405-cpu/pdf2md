@@ -65,6 +65,8 @@ class Normalizer:
         self.item_space = bool(n.get("item_number_space", True))
         self.roman = _roman_table(n.get("roman_heads", {}))
         self.article_ocr = bool(n.get("article_ocr", True))
+        self.title_brackets = bool(n.get("repair_title_brackets", True))
+        self.close_alt = "".join(c for c in self.closes if c not in "])}")
         self.case_sep = _case_sep_rx(cfg, n.get("case_inner_seps", []))
         self.date_hangul = n.get("date_trailing_hangul", "warn")
         self.stars = "".join(cfg["preserve"]["star"]["chars"])
@@ -78,7 +80,12 @@ class Normalizer:
     def normalize_page(self, page: Page) -> list[Change]:
         changes: list[Change] = []
         for line in page.lines:
+            before = line.text
             line.text = self.normalize_line(line.text, page.number, changes)
+            if before.strip() and not line.text.strip():
+                # 노이즈만으로 이루어진 줄이었다. 통째로 사라지므로 남긴다 (§P2-1)
+                changes.append(Change(page.number, "drop", before.strip(), "",
+                                      "정규화 뒤 빈 줄이 되어 버렸다"))
         page.lines = [l for l in page.lines if l.text.strip()]
         return changes
 
@@ -95,6 +102,7 @@ class Normalizer:
 
         text = self._corrections(text, page_no, changes)
         text = self._mnemonic_brackets(text, page_no, changes)
+        text = self._title_brackets(text, page_no, changes)
         text = self._noise(text, page_no, changes)
         text = self._case_seps(text, page_no, changes)
         text = self._cases(text, page_no, changes)
@@ -159,6 +167,40 @@ class Normalizer:
                                       f"[{m.group('body')}]" + tail,
                                       _ctx(text, m.start(), m.end())))
                 text = fixed
+        return text
+
+    # ── 제목·각주의 대괄호 오인식 (§P2-2) ─────────────────────────
+    def _title_brackets(self, text: str, page_no: int, changes: list[Change]) -> str:
+        """두문자가 아닌 긴 제목의 대괄호를 되돌린다.
+
+        'E-2. 」명시적 일부청구 중복소제기]' 는 여는 대괄호가 닫는 괄호 글자로
+        흘러나온 것이다. 안쪽이 두문자가 아니라 두문자 복구가 못 잡는다.
+        **한 줄 안에서 짝이 맞아떨어질 때만** 고친다 — 짝이 안 맞으면 무엇을
+        고쳐야 할지 알 수 없고, 찍어서 고치면 원문이 훼손된다.
+        """
+        if not self.title_brackets or not self.close_alt:
+            return text
+        alt = self.close_alt
+
+        # ① '[' 로 열고 이상한 글자로 닫은 것 → ']' 로
+        opened = text.find("[")
+        if opened >= 0 and "]" not in text[opened:]:
+            for j in range(opened + 1, len(text)):
+                if text[j] in alt:
+                    fixed = text[:j] + "]" + text[j + 1:]
+                    changes.append(Change(page_no, "bracket", text[j], "]",
+                                          _ctx(text, j, j + 1)))
+                    return fixed
+
+        # ② 닫는 글자로 열고 ']' 로 닫은 것 → '[' 로
+        closed = text.find("]")
+        if closed > 0 and "[" not in text[:closed]:
+            for j in range(closed):
+                if text[j] in alt and j + 1 < len(text) and text[j + 1] not in " \t":
+                    fixed = text[:j] + "[" + text[j + 1:]
+                    changes.append(Change(page_no, "bracket", text[j], "[",
+                                          _ctx(text, j, j + 1)))
+                    return fixed
         return text
 
     # ── 사건번호 둘레 정리 (§2.1) ─────────────────────────────────

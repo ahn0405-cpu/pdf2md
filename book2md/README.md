@@ -112,7 +112,21 @@ output/
     ├── caselist.txt      사건번호 전수 — 눈으로 확인할 목록
     ├── mnemonics.txt     두문자 전수
     ├── crosscheck.md     두 소스 두문자 대조 (§5.3)
+    ├── mnemonic_conflicts.md  두문자 결정표 — 네모에 표시하면 되먹일 수 있다
+    ├── mnemonic_pages/   결정에 필요한 쪽 그림
+    ├── removed_lines.md  버린 줄 전부 (머리말·꼬리말·옆번호·빈 줄)
+    ├── emphasis_check/   색을 못 읽은 쪽의 표준판례 판시 그림 (폴백)
     └── warnings.md       수동 확인 필요 지점
+```
+
+두문자가 두 책에서 한 글자 다르면 `mnemonic_conflicts.md` 의 네모에 표시만
+하면 된다. 옮겨 적기는 기계가 한다 — 손으로 옮기다 한 글자가 틀어지는 것이
+이 문서에서 가장 무서운 사고다.
+
+```bash
+./convert apply-decisions output/_reports/mnemonic_conflicts.md --dry-run
+./convert apply-decisions output/_reports/mnemonic_conflicts.md
+./convert run 기본서.pdf --profile textbook --from normalize
 ```
 
 중간 파일은 `output/_work/<파일이름>/` 에 남는다
@@ -205,6 +219,14 @@ output/
   §2.5 가 지키라는 것은 「각주를 버리지 않는 것」이다. *정의 없는 참조*는 각주
   본문이 사라진 것이므로 FAIL, *참조를 못 이은 각주*는 본문이 섹션 끝에 그대로
   있으므로 WARN 으로 둔다. 리포트에 두 줄로 나눠 적는다.
+- **로마자 절 번호는 헤딩 판정 앞에서 되돌린다.** OCR 이 `III` 을 `Ill`(소문자
+  L 두 개)로 흘리면 그 절이 헤딩에서 탈락해 목차에서 통째로 사라진다.
+  **줄 맨 앞 + 뒤에 `.` 또는 공백 + 한글 제목**일 때만 고친다. 문장 속 `l` 은
+  건드리지 않는다. 표는 `normalize.roman_heads` 에 있다.
+- **스캔본의 색은 낱말마다 본다.** span 은 OCR 이 멋대로 끊어 놓은 덩어리라,
+  통째로 판정하면 강조 한 낱말이 문장 전체를 물들이거나 평균에 묻혀 사라진다.
+  이 모드에서는 글자 굵기·크기를 판정에 쓰지 않는다 — 스캔본의 글자 속성은
+  OCR 이 지어낸 것이라 근거가 못 된다.
 - **OCR 이 글자를 삼켜 되살릴 수 없는 것**(`仏018다210539` — 여는 괄호와 연도
   첫 자리가 함께 뭉개짐)은 프로그램이 고치지 않는다. 무엇으로 되돌릴지는 원문을
   본 사람만 안다. `config.yaml` 의 `corrections:` 에 사람이 적은 것만 바꾸고,
@@ -227,6 +249,10 @@ output/
 | 색상 강조 유실 | 5% 이하 | WARN |
 | 잔여 노이즈 | 쪽당 3건 이하 | WARN |
 | 두문자 교차 일치 | 0건 불일치 | `crosscheck` 가 종료 코드 1 |
+| 목차(`outline`) ↔ 실제 헤딩 | 전부 일치 | FAIL |
+| 표준판례 쪽의 강조(`==`) 개수 | 5건 이상 | FAIL |
+| 두문자에 섞인 조문번호 | 0건 | FAIL |
+| 로마자 절 번호 연속성 (I→II→III) | 결번 없음 | WARN |
 
 별표·색상 대조는 `baseline.json`(추출 단계에서 **파서와 독립적으로** 뜬 원문
 카운트)과 맞춰 본다. baseline 이 없으면 그 항목은 판정하지 않고 '대조 불가'라고

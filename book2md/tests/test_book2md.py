@@ -528,7 +528,7 @@ class 종단(unittest.TestCase):
         self.assertIn("> 불법행위로", case)                      # 지문 분리
 
         from book2md.crosscheck import crosscheck
-        text, mismatches = crosscheck(out / "기본서", out / "사례집", CFG)
+        text, mismatches, decisions = crosscheck(out / "기본서", out / "사례집", CFG)
         self.assertEqual(mismatches, 1)                        # 확객시전 vs 확객시젠
         self.assertIn("확객시젠", text)
         self.assertIn("확객시전", text)
@@ -693,6 +693,17 @@ class 스캔본(unittest.TestCase):
         self.assertIn('outline: ["의의", "소송물", "시효중단", "기판력"]', md)
         # 꼬리말은 본문에도 각주에도 들어가지 않는다
         self.assertNotIn("윤곽민사소송법", md)
+        # §P0-1 로마자가 소문자 L 로 흘러나와도 헤딩으로 선다
+        self.assertIn("#### II. 소송물", md)
+        self.assertIn("#### III. 기판력", md)
+        self.assertIn('"II. 소송물"', md)          # sections 에도 있다
+        # §P1-2 인용된 조문은 두문자가 아니라 articles 로
+        self.assertIn('articles: ["제265조"]', md)
+        self.assertNotIn('"제265조"', md.split("articles:")[0])
+        # §P2-1 무엇을 버렸는지 남긴다
+        removed = (out / "_reports" / "removed_lines.md").read_text(encoding="utf-8")
+        self.assertIn("154·윤곽민사소송법", removed)
+        self.assertIn("sE-8", removed)
 
     def test_지난_결과물을_지우고_쓴다(self):
         """옛 파일이 남으면 검증이 같은 내용을 두 번 세어 별표가 2배가 된다."""
@@ -731,6 +742,108 @@ class 스캔본(unittest.TestCase):
         for r in rows:
             if r["kind"] == "mnemonic":
                 self.assertIn("일나시 나소시", r["after"])   # 안쪽 글자 그대로
+
+
+
+class 수정요청_01(unittest.TestCase):
+    """수정 요청 #01 — 낱글자가 틀리면 안 되는 자리들"""
+
+    def test_로마자_절번호를_헤딩_판정_전에_되돌린다(self):
+        # 마침표 뒤에 공백이 없는 것이 실물의 defect 였다
+        self.assertEqual(norm("Ill.중복소제기"), "III.중복소제기")
+        self.assertEqual(norm("lll. 기판력"), "III. 기판력")
+        self.assertEqual(norm("N.소의 이익"), "IV.소의 이익")
+        self.assertEqual(norm("씨. 과실상계"), "VI. 과실상계")
+
+    def test_본문_속_소문자_L_은_건드리지_않는다(self):
+        self.assertEqual(norm("본문에 l 이 섞여 있다"), "본문에 l 이 섞여 있다")
+        self.assertEqual(norm("판시는 lll 아니다."), "판시는 lll 아니다.")
+
+    def test_다카_부호와_내부_콜론(self):
+        self.assertEqual(norm("＜96다:30113)"), "(96다30113)")
+        m = PAT.case.search("87다카1416")
+        self.assertEqual(m.group("suffix"), "다카")     # '다' 로 잘리면 안 된다
+        self.assertEqual(PAT.case_problems(m), [])
+
+    def test_조문번호는_두문자가_아니다(self):
+        self.assertFalse(PAT.is_mnemonic_body("제259조"))
+        self.assertFalse(PAT.is_mnemonic_body("제218죄"))
+        self.assertTrue(PAT.is_mnemonic_body("일나시 나소시"))
+        self.assertEqual(PAT.find_articles("제265조와 제218조 제1항"),
+                         ["제265조", "제218조 제1항"])
+
+    def test_조문번호_안의_죄를_조로(self):
+        self.assertEqual(norm("제218죄 제1항"), "제218조 제1항")
+        self.assertEqual(norm("살인죄 성립"), "살인죄 성립")   # 조문이 아니면 그대로
+
+    def test_제목의_괄호_오인식을_되돌린다(self):
+        self.assertEqual(norm("E-7. 』중복소제기 금지의 요건]"),
+                         "E-7. [중복소제기 금지의 요건]")
+        self.assertEqual(norm("E-9. [기판력의 객관적 범위』"),
+                         "E-9. [기판력의 객관적 범위]")
+        # 짝이 맞는 인용부호는 건드리지 않는다
+        self.assertEqual(norm("판시 「가」 및 「나」"), "판시 「가」 및 「나」")
+
+
+class 강조_낱말단위(unittest.TestCase):
+    """§P0-2 — span 이 아니라 낱말마다 색을 본다"""
+
+    def test_이어진_낱말은_한_덩어리로_묶는다(self):
+        from book2md.parsers.pymupdf_native import _render
+        pieces = [("==", "확장의"), ("", " "), ("==", "뜻을"), ("", " "),
+                  ("==", "밝힌"), ("", " "), ("", "고 본다")]
+        self.assertEqual(_render(pieces), "==확장의 뜻을 밝힌== 고 본다")
+
+    def test_강조가_끊기면_따로_묶는다(self):
+        from book2md.parsers.pymupdf_native import _render
+        pieces = [("==", "가"), ("", " 나 "), ("==", "다")]
+        self.assertEqual(_render(pieces), "==가== 나 ==다==")
+
+
+class 두문자_결정표(unittest.TestCase):
+    """§P1-3 — 판단은 사람이, 옮겨 적기는 기계가"""
+
+    def setUp(self):
+        self.tmp = Path(tempfile.mkdtemp())
+
+    def tearDown(self):
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def test_표시한_결정만_읽는다(self):
+        from book2md.crosscheck import read_decisions
+        doc = self.tmp / "d.md"
+        doc.write_text(
+            "### MC-001 `[확객시전]` ↔ `[확객시젠]` — 1글자 차이\n"
+            "- [x] A: `확객시젠` → `확객시전`   (옳은 쪽: A 기본서)\n"
+            "- [ ] B: `확객시전` → `확객시젠`   (옳은 쪽: B 사례집)\n"
+            "### MC-002 `[가나다]` ↔ `[가나타]` — 1글자 차이\n"
+            "- [ ] A: `가나타` → `가나다`   (옳은 쪽: A 기본서)\n",
+            encoding="utf-8")
+        got = read_decisions(doc)
+        self.assertEqual(got, [{"id": "MC-001", "side": "A",
+                                "find": "확객시젠", "to": "확객시전"}])
+
+    def test_config_의_주석을_지우지_않고_붙인다(self):
+        from book2md.crosscheck import merge_corrections
+        cfg_path = self.tmp / "config.yaml"
+        shutil.copy(ROOT / "config.yaml", cfg_path)
+        before = cfg_path.read_text(encoding="utf-8")
+        added, dupes = merge_corrections(
+            cfg_path, [{"id": "MC-001", "side": "A",
+                        "find": "확객시젠", "to": "확객시전"}])
+        after = cfg_path.read_text(encoding="utf-8")
+        self.assertEqual((added, dupes), (1, 0))
+        self.assertIn('find: "[확객시젠]", to: "[확객시전]"', after)
+        # 사람이 적어 둔 주석이 살아 있어야 한다
+        for line in before.splitlines():
+            if line.strip().startswith("#") and len(line.strip()) > 12:
+                self.assertIn(line, after)
+        # 두 번 넣지 않는다
+        self.assertEqual(merge_corrections(
+            cfg_path, [{"id": "MC-001", "side": "A",
+                        "find": "확객시젠", "to": "확객시전"}]), (0, 1))
+        # 고친 config 가 여전히 읽힌다
+        load_config(cfg_path)
 
 
 if __name__ == "__main__":

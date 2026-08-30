@@ -174,6 +174,7 @@ def front_matter(part: Part, prof: dict, parser: str, validation: str) -> str:
     """§6.3 프론트매터. 본문에서 실제로 뽑힌 값만 싣는다."""
     cases, seen = [], set()
     mnemonics, bonus, outline, years, sidenote, sections = [], [], [], [], "", []
+    articles = []
     for b in part.blocks:
         for c in b.cases:
             if c["id"] in seen:
@@ -189,6 +190,9 @@ def front_matter(part: Part, prof: dict, parser: str, validation: str) -> str:
         for m in b.mnemonics:
             if m not in mnemonics:
                 mnemonics.append(m)
+        for a in (b.articles or []):
+            if a not in articles:
+                articles.append(a)
         meta = b.meta or {}
         if meta.get("bonus_topic"):
             bonus.append(meta["bonus_topic"])
@@ -227,6 +231,8 @@ def front_matter(part: Part, prof: dict, parser: str, validation: str) -> str:
         L.append("bonus_topics: [" + ", ".join(_q(b) for b in bonus) + "]")
     if mnemonics:
         L.append("mnemonics: [" + ", ".join(_q(m) for m in mnemonics) + "]")
+    if articles:
+        L.append("articles: [" + ", ".join(_q(a) for a in articles[:40]) + "]")
     L.append(f"converted: {_dt.date.today().isoformat()}")
     L.append(f"parser: {parser}")
     L.append(f"validation: {validation}")

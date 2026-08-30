@@ -32,6 +32,7 @@ class Block:
     page: int = 0
     cases: list = field(default_factory=list)      # [{id,label,standard}]
     mnemonics: list = field(default_factory=list)
+    articles: list = field(default_factory=list)   # 인용된 조문 (§P1-2)
     meta: dict = field(default_factory=dict)       # exam_years / sidenote / outline …
 
 
@@ -90,8 +91,10 @@ class Structurer:
         self._pending.extend(footnotes)
         # 옆번호는 그 쪽 안에서만 짝짓는다. 남으면 버리지 않고 다음 쪽으로
         # 넘기지도 않는다 — 엉뚱한 헤딩에 붙는 쪽이 못 붙는 쪽보다 나쁘다.
+        # kept=False 는 '뺐다는 기록' 일 뿐이라 헤딩에 붙이지 않는다 (§P2-1).
         self._sidenotes = [dict(s) if isinstance(s, dict) else {"text": s, "y": None}
-                           for s in (page.sidenotes or [])]
+                           for s in (page.sidenotes or [])
+                           if not isinstance(s, dict) or s.get("kept", True)]
         for line in page.lines:
             text = line.stripped
             if not text:
@@ -352,6 +355,7 @@ class Structurer:
         return Block(kind=kind, text=text, level=level, page=page,
                      cases=_case_entries(self.pat, self._label_rx, text),
                      mnemonics=self.pat.find_mnemonics(text),
+                     articles=self.pat.find_articles(text),
                      meta=meta or {})
 
 

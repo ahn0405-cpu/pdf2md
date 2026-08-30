@@ -221,9 +221,10 @@ class PyMuPDFParser(Parser):
                         at_margin = span["bbox"][0] >= margin_x
                         if (at_margin or not self.keep_sidenotes) and (
                                 side_rx.match(text) or side_inline.fullmatch(text)):
-                            if self.keep_sidenotes:
-                                sidenotes.append({"text": text,
-                                                  "y": round(span["bbox"][1], 1)})
+                            # 안 쓸 때도 무엇을 뺐는지는 남긴다 (§P2-1).
+                            sidenotes.append({"text": text,
+                                              "y": round(span["bbox"][1], 1),
+                                              "kept": bool(self.keep_sidenotes)})
                             self.stats["sidenote"] += 1
                             continue
                         kept.append(span)

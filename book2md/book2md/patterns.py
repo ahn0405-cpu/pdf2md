@@ -35,6 +35,8 @@ class Patterns:
     mnemonic_max_len: int
     label_at_line_start: bool
     mnemonic_unclosed: re.Pattern
+    mnemonic_article: re.Pattern   # 두문자로 오인된 조문번호
+    article_cite: re.Pattern       # 제265조 / 제218조 제1항
 
     @classmethod
     def build(cls, cfg: dict) -> "Patterns":
@@ -106,6 +108,14 @@ class Patterns:
         date = re.compile(r"(?<!\d)(?P<y>\d{4})\.\s*(?P<m>\d{1,2})\.\s*(?P<d>\d{1,2})\.?")
         units = _alt(nrm["article_units"])
         article = re.compile(rf"제\s+(?P<num>\d+)\s*(?P<unit>{units})(?![가-힣])")
+        # 대괄호 안이 조문번호면 두문자가 아니다 (§P1-2). 두문자는 답안에
+        # 그대로 옮겨 적는 암기 문자열이라, 조문번호가 섞이면 뒤 AI 가 그것을
+        # 암기 대상으로 오해한다.
+        mnemonic_article = re.compile(
+            mn.get("article_pattern", r"^제?\s*\d+\s*조"))
+        # 프론트매터 articles: 용. 본문에 인용된 조문을 그대로 모은다.
+        article_cite = re.compile(
+            r"제\s*\d+\s*조(?:의\s*\d+)?(?:\s*제?\s*\d+\s*[항호목])*")
 
         fn = pre["footnote"]
         lo, hi = fn["number_min"], fn["number_max"]
@@ -127,6 +137,8 @@ class Patterns:
             mnemonic_max_len=int(mn.get("max_total_len", 10)),
             label_at_line_start=bool(mn.get("label_at_line_start", True)),
             mnemonic_unclosed=mnemonic_unclosed,
+            mnemonic_article=mnemonic_article,
+            article_cite=article_cite,
         )
 
     # ── 두문자 판정 ──────────────────────────────────────────────
@@ -141,6 +153,8 @@ class Patterns:
             return False
         if len(body) > self.mnemonic_max_len:
             return False
+        if self.mnemonic_article.match(body.strip()):
+            return False                 # 조문번호는 두문자가 아니다 (§P1-2)
         return not any(w in body for w in self.deny_words)
 
     def mnemonic_spans(self, text: str) -> list[tuple[int, int, str]]:
@@ -166,6 +180,15 @@ class Patterns:
 
     def find_mnemonics(self, text: str) -> list[str]:
         return [body for _, _, body in self.mnemonic_spans(text)]
+
+    def find_articles(self, text: str) -> list[str]:
+        """본문에 인용된 조문 (§P1-2). 글자는 손대지 않고 공백만 고른다."""
+        out = []
+        for m in self.article_cite.finditer(text):
+            cite = re.sub(r"\s+", " ", m.group(0)).strip()
+            if cite not in out:
+                out.append(cite)
+        return out
 
     # ── 사건번호 판정 (§5.1) ─────────────────────────────────────
     def find_cases(self, text: str) -> list[re.Match]:

@@ -47,6 +47,7 @@ cases:                          # 이 파일에 나온 판례
     standard: true                       # 별표 = 중요 판례
 bonus_topics: ["실제로 청구취지 확장하지 않은 부분의 취급"]
 mnemonics: ["일나시 나소시", "종확나시"]
+articles: ["제265조", "제218조 제1항"]   # 인용된 조문. 두문자와 섞이지 않는다
 parser: pymupdf
 validation: WARN
 ---
@@ -55,6 +56,10 @@ validation: WARN
 `cases` 배열이 본문 사건번호와 일치하는지는 검증이 확인한다. **판례 누락
 검사에 이 배열을 쓰라.**
 
+`mnemonics` 에는 조문번호가 섞이지 않는다. 조문은 `articles` 로 따로 나간다.
+`sections` 는 실제 헤딩이고, `outline` 은 저자가 첫 줄에 늘어놓은 논점 띠다.
+둘이 어긋나면 절 하나가 헤딩으로 안 선 것이라 검증이 FAIL 로 잡는다.
+
 ## 믿어도 되는 것
 
 - 사건번호 990건, 별표(중요 판례) 표시, 각주 본문 765개가 원본과 대조해 통과했다.
@@ -62,6 +67,9 @@ validation: WARN
 - 판시 문언을 요약·재구성하지 않았다. 한자(甲乙判例)도 그대로다.
 
 ## 의심해야 하는 것
+
+> 아래 숫자는 **수정 요청 #01 반영 이전** 실행 기준이다. 재변환한 뒤
+> `_reports/validation-*.md` 의 집계로 갱신할 것.
 
 | 무엇 | 얼마나 | 어디 |
 |---|---|---|
@@ -91,6 +99,9 @@ validation: WARN
 | `caselist-<파일>.txt` | 사건번호 전수 + 출현 위치 |
 | `mnemonics-<파일>.txt` | 두문자 전수 |
 | `crosscheck-*.md` | 기본서↔사례집 두문자 대조 |
+| `mnemonic_conflicts-*.md` | 두문자 결정표 (사람이 표시 → `apply-decisions`) |
+| `removed_lines.md` | 버린 줄 전부 — 본문이 섞였는지 확인용 |
+| `emphasis_check/` | 색을 못 읽은 쪽의 표준판례 판시 그림 (있을 때만) |
 | `palette-<파일>.md` | 색상 팔레트 |
 | `diagnosis-<파일>.md` | 원본 PDF 진단 |
 

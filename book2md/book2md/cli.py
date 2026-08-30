@@ -19,7 +19,7 @@ from pathlib import Path
 
 from . import diagnose as diag_mod
 from .config import load_config, profile as get_profile
-from .crosscheck import crosscheck
+from .crosscheck import crosscheck, read_decisions, merge_corrections
 from .parsers import availability, get_parser, pick_parser
 from .pipeline import Pipeline, STAGES
 from .validate import validate as run_validate, reports as validation_reports, load_baseline
@@ -74,6 +74,11 @@ def main(argv=None) -> int:
     c.add_argument("dir_b")
     c.add_argument("--labels", default="기본서,사례집")
 
+    ad = sub.add_parser("apply-decisions",
+                        help="두문자 결정표(§P1-3)에 표시한 대로 config.yaml 을 고친다")
+    ad.add_argument("decisions", help="_reports/mnemonic_conflicts.md")
+    ad.add_argument("--dry-run", action="store_true", help="무엇이 들어갈지만 보여준다")
+
     al = sub.add_parser("all", help="폴더 안 PDF 를 진단→변환→검증→교차검증까지 한 번에")
     al.add_argument("pdf_dir", help="PDF 가 든 폴더 (또는 PDF 파일 하나)")
     al.add_argument("--out", default="output", help="출력 루트 (기본 output)")
@@ -96,7 +101,7 @@ def main(argv=None) -> int:
 
     args = ap.parse_args(argv)
     cfg = load_config(args.config)
-    return globals()[f"_cmd_{args.cmd}"](args, cfg)
+    return globals()[f"_cmd_{args.cmd.replace('-', '_')}"](args, cfg)
 
 
 # ── diagnose ────────────────────────────────────────────────────
@@ -278,17 +283,50 @@ def _merge_baselines(root: Path) -> dict | None:
 # ── crosscheck ──────────────────────────────────────────────────
 def _cmd_crosscheck(args, cfg) -> int:
     la, lb = (args.labels.split(",") + ["A", "B"])[:2]
-    text, mismatches = crosscheck(args.dir_a, args.dir_b, cfg, la, lb)
     root = Path(args.dir_a).parent
     reports = root / "_reports"
     reports.mkdir(parents=True, exist_ok=True)
+    text, mismatches, decisions = crosscheck(args.dir_a, args.dir_b, cfg, la, lb,
+                                             reports_dir=reports)
     (reports / "crosscheck.md").write_text(text, encoding="utf-8")
+    (reports / "mnemonic_conflicts.md").write_text(decisions, encoding="utf-8")
     print(text)
     print(f"→ {reports / 'crosscheck.md'}")
+    print(f"→ {reports / 'mnemonic_conflicts.md'} (네모에 표시한 뒤 "
+          f"convert apply-decisions)")
     if mismatches:
         print(f"\n두문자 불일치 의심 {mismatches}건. 사람이 판단할 것 (§2.2). "
               f"자동 교정하지 않았다.", file=sys.stderr)
         return 1
+    return 0
+
+
+# ── apply-decisions (§P1-3) ─────────────────────────────────────
+def _cmd_apply_decisions(args, cfg) -> int:
+    """결정표의 네모를 config.yaml 의 corrections 로 옮긴다.
+
+    사람이 손으로 옮겨 적는 동안 한 글자가 틀어지는 것이 이 문서에서 가장
+    무서운 사고다. 그래서 옮겨 적기만 기계가 한다 — 판단은 사람이 한 그대로다.
+    """
+    src = Path(args.decisions)
+    if not src.exists():
+        print(f"파일이 없다: {src}", file=sys.stderr)
+        return 2
+    decisions = read_decisions(src)
+    if not decisions:
+        print("표시된 결정이 없다. 네모에 `x` 를 넣고 저장한 뒤 다시 부를 것.")
+        return 0
+    for d in decisions:
+        print(f"  {d['id']}  [{d['find']}] → [{d['to']}]")
+    if args.dry_run:
+        print(f"\n--dry-run 이라 아무것도 쓰지 않았다. {len(decisions)}건.")
+        return 0
+    target = Path(args.config) if args.config else \
+        Path(__file__).resolve().parent.parent / "config.yaml"
+    added, dupes = merge_corrections(target, decisions)
+    print(f"\n{target} 에 {added}건 추가 (이미 있던 것 {dupes}건).")
+    if added:
+        print("이제 변환을 다시 돌릴 것: convert run … --from normalize")
     return 0
 
 
@@ -357,11 +395,16 @@ def _cmd_all(args, cfg) -> int:
     cases = dirs.get("casebook", [])
     for a in books:
         for b in cases:
-            text, mismatch = crosscheck(a, b, cfg, a.name, b.name)
+            text, mismatch, decisions = crosscheck(a, b, cfg, a.name, b.name,
+                                                   reports_dir=reports)
             path = reports / f"crosscheck-{a.name}-{b.name}.md"
             path.write_text(text, encoding="utf-8")
+            dpath = reports / f"mnemonic_conflicts-{a.name}-{b.name}.md"
+            dpath.write_text(decisions, encoding="utf-8")
             print(f"\n[교차검증] {a.name} ↔ {b.name}: 두문자 불일치 의심 "
                   f"{mismatch}건 → {path.name}")
+            print(f"           결정표 → {dpath.name} "
+                  f"(네모 표시 후 convert apply-decisions)")
 
     print("\n" + "=" * 52)
     print(f"{'파일':<34}{'프로파일':<12}판정")
