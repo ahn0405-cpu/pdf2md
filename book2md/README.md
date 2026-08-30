@@ -119,6 +119,9 @@ output/
 (`01_raw.jsonl` → `02_normalized.jsonl` → `03_blocks.jsonl` / `03_structured.md`,
 그리고 `baseline.json`, `02_changes.jsonl`).
 
+결과물을 후속 처리에 넘길 때는 **`OUTPUT.md` 를 함께 넘긴다.** 마크업이 뜻하는
+것, 프론트매터 항목, 믿어도 되는 것과 의심해야 하는 것이 거기 정리돼 있다.
+
 ## 절대 보존 대상 (§2)
 
 | 대상 | 어떻게 지키나 |
