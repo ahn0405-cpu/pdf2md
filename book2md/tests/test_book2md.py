@@ -169,11 +169,16 @@ class 구조화(unittest.TestCase):
         md = render(blocks)
         self.assertIn("# 제3편 소송의 개시", md)
         self.assertIn("## CHAPTER 05 소송물", md)
+        # 파서가 옆번호를 넘겨 주면(mode: keep) 세로 위치가 맞는 헤딩에 붙는다
         self.assertIn("#### IV. 시효중단 `(11)` `sE-8`", md)
+        self.assertNotIn("제3편 소송의 개시 `sE-8`", md)
+        # 파서가 옆번호를 넘겨 주면(mode: keep) 세로 위치가 맞는 헤딩에 붙는다.
+        # 기본값은 drop 이라 파서가 아예 넘기지 않는다.
+        self.assertIn("#### IV. 시효중단 `(11)` `sE-8`", md)
+        self.assertNotIn("제3편 소송의 개시 `sE-8`", md)   # 편 제목이 가로채지 않는다
         self.assertIn("**1. 문제점**", md)
         heading = next(b for b in blocks if "시효중단" in b.text)
         self.assertEqual(heading.meta["exam_years"], [2011])
-        self.assertEqual(heading.meta["sidenote"], "sE-8")
 
     def test_판례_라벨과_표준판례(self):
         blocks = self._run("textbook",
@@ -247,11 +252,17 @@ class 검증(unittest.TestCase):
         self.assertEqual(res.verdict, "FAIL")
         self.assertTrue(any("5.2" in f.check for f in res.findings))
 
-    def test_여백마커_병합은_FAIL(self):
-        self._write("#### IV. 시효중단 `sE-81`\n\n본문.\n")
+    def test_옆번호가_본문에_새면_FAIL(self):
+        # 좌표 분리가 어긋나면 옆번호가 본문 글자에 붙는다 (§4.3)
+        self._write("#### IV. 시효중단 sE-81 문제점\n\n본문.\n")
         res = validate(self.dir, CFG, {"pages": 1})
         self.assertTrue(any("5.5" in f.check and f.level == "FAIL"
                             for f in res.findings))
+
+    def test_헤딩에_붙인_옆번호는_통과(self):
+        self._write("#### IV. 시효중단 `sE-8`\n\n본문.\n")
+        res = validate(self.dir, CFG, {"pages": 1})
+        self.assertEqual(res.counts["sidenote_merged"], 0)
 
     def test_각주_참조와_정의가_맞으면_통과(self):
         self._write("본문[^264] 이다.\n\n[^264]: 각주 내용.\n")
@@ -344,7 +355,8 @@ class 종단(unittest.TestCase):
         self.assertIn("(91다43695*)", book)                    # ④ 별표 보존
         self.assertIn("standard: true", book)                  #    → 프론트매터
         self.assertIn("`[확객시전]`", book)                     # ② 두문자
-        self.assertIn("`(11)` `sE-8`", book)                   # ⑨ ⑩
+        self.assertIn("`(11)`", book)                          # ⑨ 기출연도
+        self.assertNotIn("sE-8", book)                         # ⑩ 옆번호는 버린다
         self.assertIn("> ### ☑", book)                         # ⑧
         self.assertIn("[^264]:", book)                         # ⑥ 각주 정의
         self.assertIn("[^264]", book.split("[^264]:")[0])      #    본문 참조
@@ -419,7 +431,10 @@ class 스캔본(unittest.TestCase):
         self.assertIn("수량적 가분 채권을 분할 청구하는 것을 말한다.", md)
         # 제목이 색을 입고 있어도 헤딩으로 잡힌다
         self.assertIn("### 046 일부청구", md)
-        self.assertIn("#### IV. 시효중단 `(11)` `sE-8`", md)
+        self.assertIn("#### IV. 시효중단 `(11)`", md)
+        # ⑩ 옆번호는 좌표로 떼어 내되 남기지 않는다 (legend.sidenote.mode: drop).
+        # 떼어 내는 일 자체는 계속 한다 — 안 하면 본문 글자에 들러붙는다.
+        self.assertNotIn("sE-8", md)
         # 번호와 제목이 다른 조각으로 떨어진 것을 한 줄로
         self.assertIn("**3. 判例", md)
         self.assertIn("**4. 검토**", md)

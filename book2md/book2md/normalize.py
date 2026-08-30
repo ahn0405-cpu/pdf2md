@@ -45,6 +45,7 @@ class Normalizer:
         self.closes = set(n["close_brackets"])
         self.fullwidth_brackets = bool(n.get("fullwidth_brackets", True))
         self.fullwidth_alnum = bool(n.get("fullwidth_alnum", True))
+        self.fullwidth_parens = bool(n.get("fullwidth_parens", True))
         self.mnemonic_pairs = [tuple(p) for p in n.get("mnemonic_brackets", [])]
         self.repair_unclosed = bool(
             cfg["preserve"]["mnemonic"].get("repair_unclosed", True))
@@ -73,6 +74,8 @@ class Normalizer:
             text = text.replace("　", " ")
         if self.fullwidth_brackets:
             text = text.replace("［", "[").replace("］", "]")
+        if self.fullwidth_parens:
+            text = text.replace("（", "(").replace("）", ")")
 
         text = self._mnemonic_brackets(text, page_no, changes)
         text = self._noise(text, page_no, changes)
@@ -98,13 +101,15 @@ class Normalizer:
         """
         def repl(m: re.Match) -> str:
             body = m.group("body")
-            if m.group("open") == "[" and m.group("close") == "]":
+            mid = m.groupdict().get("mid") or ""
+            if m.group("open") == "[" and m.group("close") == "]" and not mid:
                 return m.group(0)
             if not self.pat.is_mnemonic_body(body):
                 return m.group(0)
-            changes.append(Change(page_no, "mnemonic", m.group(0), f"[{body}]",
+            fixed = f"[{body}]{mid}"
+            changes.append(Change(page_no, "mnemonic", m.group(0), fixed,
                                   _ctx(text, m.start(), m.end())))
-            return f"[{body}]"
+            return fixed
 
         text = self.pat.mnemonic_like.sub(repl, text)
         if self.repair_unclosed:

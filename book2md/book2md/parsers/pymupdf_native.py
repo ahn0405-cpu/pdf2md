@@ -30,6 +30,8 @@ class PyMuPDFParser(Parser):
     def __init__(self):
         self.palette: Palette | None = None
         self.stats = Counter()
+        self.keep_sidenotes = False
+        self.color_source = "span"
 
     def available(self):
         try:
@@ -78,7 +80,9 @@ class PyMuPDFParser(Parser):
 
         self.palette = Palette(cfg=color_cfg)
         want_emphasis = bool(profile.get("emphasis", True)) and bool(color_cfg)
-        want_sidenote = bool(profile.get("sidenote", False))
+        side_mode = str(side_cfg.get("mode", "drop")).lower()
+        want_sidenote = bool(profile.get("sidenote", False)) and side_mode != "off"
+        self.keep_sidenotes = side_mode == "keep"
         side_rx = re.compile(side_cfg.get("pattern", r"^s[A-Z]-\d{1,3}$"))
         side_inline = re.compile(r"s[A-Z]-\d{1,3}")
         margin_ratio = float(side_cfg.get("margin_ratio", 0.78))
@@ -87,6 +91,7 @@ class PyMuPDFParser(Parser):
         opts = dict(
             space_gap=float(ex.get("space_gap_ratio", 0.18)),
             merge_overlap=float(ex.get("line_merge_overlap", 0.55)),
+            merge_gap=float(ex.get("line_merge_max_gap", 0.06)),
             footer_zone=float(cfg.get("running", {}).get("footer_zone", 0.94)),
             footer_rx=[re.compile(x) for x in
                        cfg.get("running", {}).get("footer_patterns", [])],
@@ -104,6 +109,7 @@ class PyMuPDFParser(Parser):
             body_size = self._body_size(doc, idx[::step][:20] or idx[:1])
             self.color_source = self._pick_color_source(doc, idx, color_cfg) \
                 if want_emphasis else "none"
+            opts["running"] = self._detect_running(doc, idx, cfg.get("running", {}))
 
             for i in idx:
                 page = doc[i]
@@ -114,12 +120,48 @@ class PyMuPDFParser(Parser):
                     page, body_size, opts, color_cfg, want_emphasis,
                     want_sidenote, side_rx, side_inline,
                     rect.width * margin_ratio, i + 1, sampler)
-                lines = _merge_same_line(lines, opts["merge_overlap"])
+                lines = _merge_same_line(lines, opts["merge_overlap"],
+                                         rect.width * opts["merge_gap"])
                 self._mark_zones(lines, rect.height, body_size, opts)
                 ordered = self._order(lines, rect.width, profile.get("columns", "auto"))
                 yield Page(number=i + 1, lines=ordered, width=rect.width,
                            height=rect.height, kind="layout", body_size=body_size,
                            sidenotes=sidenotes)
+
+    # ── 되풀이되는 머리말·꼬리말 (§4.1) ──────────────────────────
+    @staticmethod
+    def _detect_running(doc, idx, cfg) -> set:
+        """쪽마다 되풀이되는 위·아래 줄의 '모양'을 모은다.
+
+        'CHAPTER 05 | 소송물 • 153' 은 쪽마다 숫자만 바뀐다. 절대 위치로 자르면
+        쪽 크기가 다른 책에서 어긋나므로, 숫자를 뺀 모양이 되풀이되는지로 본다.
+        이걸 안 하면 꼬리말이 장 제목으로 잡혀 문서가 통째로 어긋난다.
+        """
+        if not cfg.get("detect_repeating", True):
+            return set()
+        zone = float(cfg.get("repeat_zone", 0.12))
+        sample = int(cfg.get("repeat_sample", 40))
+        pages = idx[::max(1, len(idx) // sample)][:sample] or idx[:1]
+        tally: Counter = Counter()
+        for i in pages:
+            page = doc[i]
+            h = page.rect.height
+            seen = set()
+            for block in page.get_text("dict")["blocks"]:
+                if block.get("type") != 0:
+                    continue
+                for line in block.get("lines", []):
+                    y0, y1 = line["bbox"][1], line["bbox"][3]
+                    if y1 > h * zone and y0 < h * (1 - zone):
+                        continue
+                    text = "".join(sp["text"] for sp in line.get("spans", []))
+                    key = _running_key(text)
+                    if key and key not in seen:
+                        seen.add(key)
+                        tally[key] += 1
+            # 표본 한 쪽에서 같은 모양이 두 번 나와도 한 번으로 센다
+        need = max(2, int(len(pages) * float(cfg.get("repeat_min_ratio", 0.35))))
+        return {k for k, n in tally.items() if n >= need}
 
     # ── 색을 어디서 읽을지 (§2.4) ────────────────────────────────
     def _pick_color_source(self, doc, idx, color_cfg) -> str:
@@ -166,8 +208,9 @@ class PyMuPDFParser(Parser):
                         text = span["text"].strip()   # _restore_spaces 가 채워 둔다
                         if span["bbox"][0] >= margin_x and (
                                 side_rx.match(text) or side_inline.fullmatch(text)):
-                            sidenotes.append({"text": text,
-                                              "y": round(span["bbox"][1], 1)})
+                            if self.keep_sidenotes:
+                                sidenotes.append({"text": text,
+                                                  "y": round(span["bbox"][1], 1)})
                             self.stats["sidenote"] += 1
                             continue
                         kept.append(span)
@@ -232,12 +275,17 @@ class PyMuPDFParser(Parser):
         """
         if not lines:
             return
+        running = opts.get("running") or set()
+        zone = 0.12
         for line in lines:
             if line.y1 <= height * opts["header_zone"]:
                 line.zone = "header"
             elif line.y0 >= height * opts["footer_zone"] and \
                     any(rx.search(strip_markup(line.stripped)) for rx in opts["footer_rx"]):
                 line.zone = "header"        # 꼬리말도 본문이 아니다 (§4.1)
+            elif running and (line.y1 <= height * zone or line.y0 >= height * (1 - zone)) \
+                    and _running_key(strip_markup(line.text)) in running:
+                line.zone = "header"        # 쪽마다 되풀이되는 줄
 
         limit = height * (1.0 - opts["bottom_zone"])
         small = body_size * opts["size_ratio"]
@@ -335,7 +383,7 @@ def _restore_spaces(spans, gap_ratio: float) -> None:
         span["text"] = "".join(out)
 
 
-def _merge_same_line(lines, overlap: float):
+def _merge_same_line(lines, overlap: float, max_gap: float = 1e9):
     """세로로 겹치는 줄을 한 줄로 잇는다.
 
     OCR 은 한 줄 안에서도 글자 크기가 다르면 따로 떨궈 놓는다.
@@ -362,12 +410,22 @@ def _merge_same_line(lines, overlap: float):
         if not placed:
             groups.append([line])
 
-    merged = []
+    merged: list = []
     for group in groups:
         if len(group) == 1:
             merged.append(group[0])
             continue
         group.sort(key=lambda l: l.x0)
+        # 가로로 멀리 떨어진 조각은 같은 줄이라도 다른 것이다. 여백에 찍힌
+        # 장식 글자가 제목에 들러붙는 것을 막는다.
+        kept, dropped = [group[0]], []
+        for nxt in group[1:]:
+            if nxt.x0 - kept[-1].x1 > max_gap:
+                dropped.append(nxt)
+            else:
+                kept.append(nxt)
+        merged.extend(dropped)
+        group = kept
         head = group[0]
         text = head.text
         for nxt in group[1:]:
@@ -382,6 +440,15 @@ def _merge_same_line(lines, overlap: float):
         head.sup_numbers = [n for l in group for n in l.sup_numbers]
         merged.append(head)
     return sorted(merged, key=lambda l: (l.zone == "footnote", round(l.y0, 1), l.x0))
+
+
+_RUNNING_STRIP = re.compile(r"[\s\d]+")
+
+
+def _running_key(text: str) -> str:
+    """숫자와 공백을 뺀 모양. 쪽번호만 다른 꼬리말을 한 덩어리로 묶는다."""
+    key = _RUNNING_STRIP.sub("", strip_markup(text or ""))
+    return key if len(key) >= 3 else ""
 
 
 def _join_pieces(head: str, tail: str, gap: bool) -> str:

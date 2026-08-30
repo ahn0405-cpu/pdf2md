@@ -289,6 +289,8 @@ class Structurer:
     def _bonus_continues(self, text: str) -> bool:
         if len(self._bonus) >= self._bonus_max:
             return False
+        if self._bonus_head(text):
+            return False        # 새 ☑ 가 시작하면 앞 박스는 끝난 것이다
         for _, rx in self._heads:
             if rx.match(text):
                 return False

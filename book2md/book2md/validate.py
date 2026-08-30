@@ -153,6 +153,29 @@ def _mnemonics(res, pat, bodies):
             res.mnemonic_context.setdefault(body, []).append(
                 f"{path.name}: {_ctx(text, m.start(), m.end())}")
     res.counts["mnemonics"] = len(res.mnemonics)
+    _bare_mnemonics(res, pat, bodies)
+
+
+def _bare_mnemonics(res, pat, bodies):
+    """대괄호를 잃은 두문자 후보 (§2.2).
+
+    OCR 이 대괄호를 통째로 흘리면 `확객시젠[종확나시]` 처럼 앞말이 맨몸으로
+    남는다. 괄호를 우리가 지어내면 안 되므로(§4.8), 자리만 짚어 사람에게 넘긴다.
+    """
+    rx = re.compile(r"(?<![\[`가-힣])([가-힣]{3,6})\s*`?\[")
+    hits = 0
+    for path, text in bodies.items():
+        for m in rx.finditer(text):
+            token = m.group(1)
+            if token in res.mnemonics or len(token) < 3:
+                continue
+            hits += 1
+            if hits <= 12:
+                res.add("WARN", "2.2 두문자",
+                        f"대괄호를 잃은 두문자 후보: `{token}` — 괄호를 지어내지 "
+                        f"않았다. 원문을 보고 사람이 정할 것",
+                        _ctx(text, m.start(1), m.end(1)), path.name)
+    res.counts["bare_mnemonic_suspects"] = hits
 
 
 # ── 5.4 색상 강조 보존 ───────────────────────────────────────────
@@ -199,19 +222,38 @@ def _color(res, whole, baseline, cfg):
 
 # ── 5.5 여백 마커 검사 ───────────────────────────────────────────
 def _sidenotes(res, cfg, bodies):
+    """§5.5 — 옆번호가 본문에 섞여 들어갔는지.
+
+    옆번호는 좌표로 떼어 낸다(버리든 남기든). 그러니 **본문 글자 속에 남아
+    있는 `sE-n` 은 전부 새어 들어온 것**이다. 이게 §4.3 이 경고한 사고다:
+    `sE-8` + `1.` 이 붙으면 `sE-81` 이 되어 참조가 바뀐다.
+    백틱 안에 있는 것은 우리가 헤딩 옆에 일부러 붙인 것이므로 뺀다.
+    """
     suspect_rx = re.compile(cfg["legend"]["sidenote"]["merge_suspect"])
-    found, bad = [], 0
+    tagged, leaked = 0, 0
     for path, text in bodies.items():
-        found += _SIDE.findall(text)
-        for m in suspect_rx.finditer(text):
-            bad += 1
+        for m in _SIDE.finditer(text):
+            in_backticks = (text[max(0, m.start() - 1):m.start()] == "`"
+                            and text[m.end():m.end() + 1] == "`")
+            if in_backticks:
+                tagged += 1
+                if suspect_rx.search(m.group(0)):
+                    leaked += 1
+                    res.add("FAIL", "5.5 여백 마커",
+                            f"자릿수가 이상한 옆번호: `{m.group(0)}` "
+                            f"(sE-8 + 1. → sE-81 꼴)",
+                            _ctx(text, m.start(), m.end()), path.name)
+                continue
+            leaked += 1
             res.add("FAIL", "5.5 여백 마커",
-                    f"본문 병합 의심: `{m.group(0)}` (sE-8 + 1. → sE-81 꼴)",
+                    f"옆번호가 본문에 섞였다: `{m.group(0)}` — 좌표 분리가 "
+                    f"어긋났다는 뜻이고, 붙은 글자만큼 참조 번호가 바뀐다",
                     _ctx(text, m.start(), m.end()), path.name)
-    res.counts["sidenotes"] = len(found)
-    res.counts["sidenote_merged"] = bad
-    if found and not bad:
-        res.add("INFO", "5.5 여백 마커", f"{len(found)}건 추출, 병합 의심 0건")
+    res.counts["sidenotes"] = tagged
+    res.counts["sidenote_merged"] = leaked
+    if not leaked:
+        res.add("INFO", "5.5 여백 마커",
+                f"본문에 새어 든 옆번호 0건 (헤딩에 붙인 것 {tagged}건)")
 
 
 # ── 5.6 각주 무결성 ──────────────────────────────────────────────

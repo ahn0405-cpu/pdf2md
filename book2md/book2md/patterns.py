@@ -72,8 +72,11 @@ class Patterns:
         # 그래서 짝을 맞추지 않고, 안쪽이 두문자 모양이면 받아들인다.
         opens = "".join(a for a, _ in nrm["mnemonic_brackets"]) + "[［"
         closes = "".join(b for _, b in nrm["mnemonic_brackets"]) + "]］"
+        # 강조 표시가 두문자와 닫는 괄호 사이에 끼기도 한다: `[일외별명일==】`.
+        # 색을 먼저 입히고 정규화가 나중에 돌기 때문이다. 표시는 살려 뒤로 옮긴다.
         mnemonic_like = re.compile(
-            rf"(?P<open>[{re.escape(opens)}])(?P<body>{inner})(?P<close>[{re.escape(closes)}])(?![(:])"
+            rf"(?P<open>[{re.escape(opens)}])(?P<body>{inner})"
+            rf"(?P<mid>(?:==|\*\*)?)(?P<close>[{re.escape(closes)}])(?![(:])"
         )
         # 닫는 괄호를 통째로 흘린 경우: `(1) 원칙 ［일나시 나소시`(줄 끝).
         # 줄 끝에 강조 마크업(==, **)이 붙어 있을 수 있다. 파서가 색을 먼저

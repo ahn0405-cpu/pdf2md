@@ -49,6 +49,7 @@ class FootnoteCollector:
     def __init__(self, cfg: dict, pat: Patterns):
         self.pat = pat
         fn = cfg["preserve"]["footnote"]
+        self.bottom_zone = float(fn.get("bottom_zone", 0.42))
         self.lo = int(fn.get("number_min", 1))
         self.hi = int(fn.get("number_max", 4000))
         self.tail_lines = int(fn.get("markdown_tail_lines", 12))
@@ -62,10 +63,11 @@ class FootnoteCollector:
         page.lines 는 본문만 남는다(각주 줄은 빠진다).
         """
         zone = [l for l in page.lines if l.zone == "footnote"]
-        if not zone:
-            # 스캔본 OCR 은 글자 크기가 들쭉날쭉해 크기로는 각주 영역을 못 가른다.
-            # 그럴 때는 쪽 아래쪽에서 번호로 시작하는 줄 뭉치를 찾는다.
-            zone = self._guess_zone(page)
+        # 크기로 잡은 영역이 있어도, 번호로 찾은 시작점이 더 위면 그쪽을 쓴다.
+        # 각주 안에서 글자 크기가 흔들려 위쪽 몇 줄이 잘려 나가기 때문이다.
+        guessed = self._guess_zone(page)
+        if guessed and (not zone or guessed[0].y0 < zone[0].y0):
+            zone = guessed
         if not zone:
             body = [l for l in page.lines if l.zone in ("body", "header")]
             self._inline_refs(page, body, [])
@@ -127,10 +129,20 @@ class FootnoteCollector:
 
     # ── 좌표가 없을 때 각주 영역 추정 ─────────────────────────────
     def _guess_zone(self, page: Page):
+        """번호로 시작하는 줄부터 쪽 끝까지를 각주로 본다.
+
+        스캔본 OCR 은 각주 안에서도 글자 크기가 7.2~8.0 으로 흔들린다. 크기만
+        보고 아래에서 위로 올라가면 중간의 큰 줄에서 끊겨 264·265 번을 통째로
+        놓친다. 좌표가 있으면 쪽 아래쪽 전체를 훑어 **가장 위쪽** 후보를 잡는다.
+        """
         lines = [l for l in page.lines if l.stripped]
         if not lines:
             return []
-        tail = lines[-self.tail_lines:]
+        if page.kind == "layout" and page.height:
+            limit = page.height * (1.0 - self.bottom_zone)
+            tail = [l for l in lines if l.y0 >= limit and l.zone != "header"]
+        else:
+            tail = lines[-self.tail_lines:]
         start = None
         for k, line in enumerate(tail):
             m = _num_head(line.stripped)
