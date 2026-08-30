@@ -319,7 +319,7 @@ def lines(pdf_path: str, cfg: dict, prof: dict, pages) -> str:
     prof = dict(prof)
     prof["_config"] = cfg
     parser = get_parser("pymupdf")
-    norm = Normalizer(cfg, pat)
+    norm = Normalizer(cfg, pat, prof)
     collector = FootnoteCollector(cfg, pat)
 
     heads = [(h["level"], re.compile(h["pattern"])) for h in prof.get("headings", [])]

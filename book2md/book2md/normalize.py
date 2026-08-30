@@ -20,7 +20,7 @@ from .patterns import Patterns
 
 #: 줄 맨 앞의 로마자 절 번호. 앞에 강조 표시가 붙어 있을 수 있다.
 #: 뒤에는 '.'(또는 공백)과 한글 제목이 와야 한다.
-def _roman_head_rx(table: dict) -> re.Pattern:
+def _roman_head_rx(table: dict, head_seps=None):
     """줄 맨 앞의 로마자 절 번호를 잡는 정규식.
 
     글자 목록은 config 의 roman_heads 에서 그대로 뽑는다. 표에 새 오인식을
@@ -34,9 +34,14 @@ def _roman_head_rx(table: dict) -> re.Pattern:
     # 번호 글자로 새어 들어가 '।.' 을 통째로 번호로 삼고 표에서 못 찾는다.
     chars -= set(".,·  \t")
     cls = "".join(sorted(chars))
-    return re.compile(
-        rf"^(?:[=*]{{2}})?\s*(?P<num>[{re.escape(cls)}]{{1,5}})"
-        rf"(?:\s*[.,·]\s*|\s+)(?=[가-힣])")
+    seps = re.escape("".join(sorted(set(head_seps or ".,·"))))
+    num = (rf"(?P<num>[{re.escape(cls)}]{{1,5}})"
+           rf"(?:\s*(?P<sep>[{seps}])\s*|\s+)(?=[가-힣])")
+    head = re.compile(rf"^(?:[=*]{{2}})?\s*{num}")
+    # 앞 문단 끝에 붙어 버린 제목: '…위함이다.[^73] ==H . 사유== i) 제34조…'
+    # 문장이 끝난 자리 + 강조 여는 표시 바로 뒤일 때만 본다.
+    inline = re.compile(rf"(?:[.?!\]\)])\s*(?:==|\*\*)\s*{num}")
+    return head, inline
 
 #: 제N죄/제N좌 → 제N조 (조문번호 안에서만)
 _ARTICLE_OCR = re.compile(r"제\s*(\d+)\s*[죄좌](?![가-힣])")
@@ -65,7 +70,7 @@ class Change:
 
 
 class Normalizer:
-    def __init__(self, cfg: dict, pat: Patterns):
+    def __init__(self, cfg: dict, pat: Patterns, prof: dict | None = None):
         self.cfg = cfg
         self.pat = pat
         n = cfg["normalize"]
@@ -83,8 +88,15 @@ class Normalizer:
         self.fix_dates = bool(n.get("fix_dates", True))
         self.item_space = bool(n.get("item_number_space", True))
         self.head_space = bool(n.get("heading_number_space", True))
-        self.roman = _roman_table(n.get("roman_heads", {}))
-        self.roman_rx = _roman_head_rx(self.roman)
+        # 프로파일마다 다른 오인식이 있다. 기본서에서는 'H' 가 II 지만,
+        # 사례집은 문제 묶음을 A~Q 글자로 세므로 그러면 장 제목이 깨진다.
+        heads = dict(n.get("roman_heads", {}))
+        for num, extra in ((prof or {}).get("roman_heads_extra", {}) or {}).items():
+            heads[num] = list(heads.get(num, [])) + list(extra)
+        self.head_seps = n.get("head_seps", [".", ",", "·"])
+        self.roman = _roman_table(heads)
+        self.roman_rx, self.roman_inline_rx = _roman_head_rx(
+            self.roman, self.head_seps)
         self.article_ocr = bool(n.get("article_ocr", True))
         self.title_brackets = bool(n.get("repair_title_brackets", True))
         self.close_alt = "".join(c for c in self.closes if c not in "])}")
@@ -293,24 +305,36 @@ class Normalizer:
 
     # ── 로마자 절 번호 되살리기 (§P0-1) ──────────────────────────
     def _roman_head(self, text: str, page_no: int, changes: list[Change]) -> str:
-        """줄 맨 앞의 로마자가 소문자 L 로 흘러나온 것을 되돌린다.
+        """줄 맨 앞의 로마자 절 번호를 되돌린다.
 
-        'Ill. 중복소제기' 가 헤딩으로 안 잡히면 그 절 전체가 목차에서 사라진다.
-        **줄 맨 앞 + 뒤에 '.' 또는 공백 + 한글 제목**일 때만 고친다. 문장 속
-        'l' 을 건드리면 본문이 망가진다.
+        'Ill. 중복소제기'(소문자 L), '।. 의의'(데바나가리 단다), 'H . 사유'(II)
+        가 헤딩으로 안 잡히면 그 절 전체가 목차에서 사라진다. **줄 맨 앞 +
+        뒤에 구분점 또는 공백 + 한글 제목**일 때만 고친다. 문장 속 'l' 을
+        건드리면 본문이 망가진다.
+
+        구분점이 '•' 같은 것으로 흘러나온 자리도 마침표로 되돌린다. 종이에
+        찍힌 것은 마침표다. 안 되돌리면 뒤의 헤딩 정규식마다 이 글자를 하나씩
+        더 받아야 하고, 하나만 빠뜨리면 그 절이 통째로 사라진다.
         """
         if not self.roman:
             return text
-        m = self.roman_rx.match(text)
+        m = self.roman_rx.match(text) or self.roman_inline_rx.search(text)
         if not m:
             return text
+
         raw = m.group("num")
-        fixed = self.roman.get(raw)
-        if not fixed or fixed == raw:
+        fixed = self.roman.get(raw) or raw
+        sep = m.group("sep")
+        if fixed == raw and (not sep or sep == "."):
             return text
-        out = text[:m.start("num")] + fixed + text[m.end("num"):]
-        changes.append(Change(page_no, "roman", raw, fixed, _ctx(text, m.start("num"),
-                                                                m.end("num"))))
+
+        # 번호와 제목 사이를 한 꼴로 맞춘다: 'H . 사유' → 'II. 사유'.
+        # 구분점이 없던 자리에 마침표를 새로 넣지는 않는다.
+        tail = ". " if sep else " "
+        out = text[:m.start("num")] + fixed + tail + text[m.end():]
+        changes.append(Change(page_no, "roman", text[m.start("num"):m.end()].strip(),
+                              (fixed + tail).strip(),
+                              _ctx(text, m.start("num"), m.end())))
         return out
 
     # ── 조문 공백 (§4.1) ─────────────────────────────────────────

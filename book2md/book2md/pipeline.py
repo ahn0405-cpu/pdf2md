@@ -174,7 +174,7 @@ class Pipeline:
 
     # ── 2. 정규화 ───────────────────────────────────────────────
     def normalize(self) -> None:
-        norm = Normalizer(self.cfg, self.pat)
+        norm = Normalizer(self.cfg, self.pat, self.prof)
         changes = 0
         with open(self.changes, "w", encoding="utf-8") as log:
             def gen():

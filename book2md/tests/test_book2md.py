@@ -788,6 +788,43 @@ class 스캔본(unittest.TestCase):
 class 수정요청_01(unittest.TestCase):
     """수정 요청 #01 — 낱글자가 틀리면 안 되는 자리들"""
 
+    def _tb(self):
+        from book2md.normalize import Normalizer
+        return Normalizer(CFG, PAT, get_profile(CFG, "textbook"))
+
+    def _cb(self):
+        from book2md.normalize import Normalizer
+        return Normalizer(CFG, PAT, get_profile(CFG, "casebook"))
+
+    def test_구분점이_마침표가_아니어도_절번호로_본다(self):
+        """'•'(U+2022) 는 '·'(U+00B7) 과 생김새가 같아도 다른 글자다.
+
+        실물 104_105기판력의주관적범위.md 에서 'I • 의의 및 취지' 하나가
+        절에서 탈락하자 그 아래 소항목들이 절로 승격돼 버렸다.
+        """
+        n = self._tb()
+        self.assertEqual(n.normalize_line("==I • 의의 및 취지==", 1, []),
+                         "==I. 의의 및 취지==")
+        self.assertEqual(n.normalize_line("I ・ 효과", 1, []), "I. 효과")
+
+    def test_II_가_H_로_읽힌_것은_기본서에서만_되돌린다(self):
+        """사례집은 문제 묶음을 A~Q 글자로 센다. 거기서 H 를 바꾸면 장 제목이 깨진다."""
+        self.assertEqual(self._tb().normalize_line("H . 사유", 1, []), "II. 사유")
+        self.assertEqual(self._cb().normalize_line("H. 처분권주의", 1, []),
+                         "H. 처분권주의")
+        self.assertEqual(self._cb().normalize_line("H-15. [변론주의]", 1, []),
+                         "H-15. [변론주의]")
+
+    def test_앞_문단_끝에_붙어_버린_제목도_되돌린다(self):
+        """실물 11_012이송개관.md 의 '…위함이다.[^73] ==H . 사유== i) 제34조…'"""
+        n = self._tb()
+        got = n.normalize_line(
+            "옮기는 것이다.[^73][^74] ==H . 사유== i) 제34조 제1항의 이송", 1, [])
+        self.assertIn("==II. 사유==", got)
+        # 문장 도중의 강조는 건드리지 않는다
+        self.assertEqual(n.normalize_line("판시가 그러하다. ==확장의 뜻을== 밝힌", 1, []),
+                         "판시가 그러하다. ==확장의 뜻을== 밝힌")
+
     def test_로마자_절번호를_헤딩_판정_전에_되돌린다(self):
         # 마침표 뒤에 공백이 없는 것이 실물의 defect 였다. 종이에는 공백이
         # 있으므로 함께 되살린다.
@@ -959,6 +996,20 @@ class 달림제목(unittest.TestCase):
 
     def test_색이_있어도_제목_무늬가_아니면_그냥_둔다(self):
         out = self._render(["==확장의 뜻을 밝힌 때에는== 전부에 미친다고 본다."])
+        self.assertNotIn("####", out)
+
+    def test_앞_문단_끝에_붙은_제목을_떼어_낸다(self):
+        out = self._render([
+            "옮기는 것이다.[^73][^74] ==II. 사유== i) 제34조 제1항의 관할위반에 "
+            "의한 이송 ii) 제35조의 심판편의에 의한 이송"])
+        self.assertIn("#### II. 사유", out)
+        head, _, tail = out.partition("#### II. 사유")
+        self.assertIn("옮기는 것이다.[^73][^74]", head)
+        self.assertIn("i) 제34조 제1항의 관할위반", tail)
+
+    def test_문장_도중의_강조는_제목이_아니다(self):
+        out = self._render([
+            "일부청구는 ==II. 사유== 라는 말을 쓰지 않는다는 뜻으로 보아야 한다."])
         self.assertNotIn("####", out)
 
 
