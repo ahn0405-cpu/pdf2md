@@ -16,6 +16,7 @@ from collections import Counter, defaultdict
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from .model import is_generated
 from .patterns import Patterns
 
 _SIDE = re.compile(r"s[A-Z]-\d{1,4}")
@@ -80,11 +81,7 @@ def _is_ours(path: Path) -> bool:
     사람이 출력 폴더에 둔 메모까지 검증하면 그 안의 사건번호가 caselist 에
     섞이고 별표 수가 어긋난다. 프론트매터에 parser 가 적힌 것만 본다.
     """
-    try:
-        head = path.read_text(encoding="utf-8")[:400]
-    except Exception:
-        return False
-    return head.startswith("---") and "\nparser:" in head
+    return is_generated(path)
 
 
 def validate(root, cfg: dict, baseline: dict | None = None) -> Result:

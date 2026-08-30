@@ -249,6 +249,45 @@ def casebook(path: Path):
 #   · 여는 괄호가 ＜ 로 흘러나온다 (§2.1)
 #   · 닫는 대괄호가 통째로 빠진다 (§2.2)
 #   · 각주 참조가 위첨자가 아니라 'NNN)' 으로 떨어진다 (§2.5)
+def scanned_book(path: Path, pages: int = 6):
+    """여러 쪽짜리 스캔본. 쪽마다 되풀이되는 꼬리말이 있다.
+
+    실물처럼 꼬리말이 쪽번호만 바뀌고, 마지막 두 쪽만 다른 장으로 넘어간다.
+    이런 꼬리말이 장 제목으로 잡히면 문서 전체가 어긋난다(§4.1).
+    """
+    W, H, M = 470, 700, 46
+    doc = pymupdf.open()
+    for k in range(pages):
+        page_no = 152 + k
+        chapter = "05 | 소송물" if k < pages - 2 else "06 | 소송절차 개시"
+        # 홀짝으로 꼬리말 모양이 갈리는 것까지 실물과 같게 둔다
+        footer = (f"CHAPTER {chapter} · {page_no}" if k % 2
+                  else f"{page_no} · 윤곽 민사소송법")
+        rows = [
+            (70, M, f"0{40 + k} 논점 {k + 1}", BLUE),
+            (96, M, "I. 의의", BLACK),
+            (118, M, f"이 논점의 의의는 이러하다({70 + k}다{1000 + k}).", BLACK),
+        ]
+        paper = pymupdf.open()
+        sheet = paper.new_page(width=W, height=H)
+        sheet.insert_font(fontname="wqy", fontfile=FONT)
+        for y, x, text, color in rows:
+            sheet.insert_text((x, y), text, fontname="wqy", fontsize=9, color=color)
+        sheet.insert_text((M, 676), footer, fontname="wqy", fontsize=7.6, color=BLACK)
+        pix = sheet.get_pixmap(dpi=150)
+        paper.close()
+
+        out = doc.new_page(width=W, height=H)
+        out.insert_image(pymupdf.Rect(0, 0, W, H), pixmap=pix)
+        out.insert_font(fontname="wqy", fontfile=FONT)
+        for y, x, text, _ in rows:
+            _place_ocr(out, x, y, text, text.replace(" ", ""), 9)
+        out.insert_text((M, 676), footer.replace(" ", ""), fontname="wqy",
+                        fontsize=7.6, render_mode=3)
+    doc.save(str(path))
+    doc.close()
+
+
 def scanned_textbook(path: Path):
     """(종이 모양, OCR 이 흘린 글자) 짝으로 스캔본을 짓는다.
 
@@ -333,5 +372,6 @@ if __name__ == "__main__":
     textbook(out / "기본서.pdf")
     casebook(out / "사례집.pdf")
     scanned_textbook(out / "스캔기본서.pdf")
+    scanned_book(out / "스캔여러쪽.pdf", pages=6)
     for p in sorted(out.glob("*.pdf")):
         print(f"{p}  {p.stat().st_size:,} bytes")

@@ -374,6 +374,54 @@ class 종단(unittest.TestCase):
         self.assertIn("확객시전", text)
 
 
+class 되풀이꼬리말(unittest.TestCase):
+    """쪽마다 되풀이되는 꼬리말이 장 제목으로 둔갑하지 않아야 한다 (§4.1)."""
+
+    @classmethod
+    def setUpClass(cls):
+        try:
+            import pymupdf  # noqa: F401
+        except Exception:
+            raise unittest.SkipTest("PyMuPDF 없음")
+        sys.path.insert(0, str(ROOT / "tests"))
+        import make_fixtures
+        if not Path(make_fixtures.FONT).exists():
+            raise unittest.SkipTest("한글 글꼴 없음")
+        cls.tmp = Path(tempfile.mkdtemp())
+        cls.pdf = cls.tmp / "여러쪽.pdf"
+        make_fixtures.scanned_book(cls.pdf, pages=6)
+
+    @classmethod
+    def tearDownClass(cls):
+        shutil.rmtree(getattr(cls, "tmp", "/nonexistent"), ignore_errors=True)
+
+    def _convert(self, out_name, pages=None):
+        from book2md.pipeline import Pipeline
+        out = self.tmp / out_name
+        prof = get_profile(CFG, "textbook")
+        Pipeline(self.pdf, CFG, prof, out / "기본서", out / "_reports",
+                 out / "_work", "pymupdf", pages, log=lambda *a: None).run("extract")
+        return "\n".join(p.read_text(encoding="utf-8")
+                          for p in sorted((out / "기본서").glob("*.md")))
+
+    def test_꼬리말이_본문에도_제목에도_없다(self):
+        md = self._convert("full")
+        self.assertNotIn("윤곽 민사소송법", md)
+        self.assertNotIn("CHAPTER 05", md)
+        self.assertIn("### 040 논점 1", md)
+        self.assertIn("(70다1000)", md)
+
+    def test_쪽_범위를_잘라도_꼬리말을_찾는다(self):
+        """범위 안에 한 번밖에 없는 장 꼬리말도 빠져야 한다.
+
+        머리말·꼬리말은 책 전체의 성질이므로 문서 전체에서 찾는다.
+        """
+        md = self._convert("partial", pages=range(4, 6))    # 마지막 두 쪽
+        self.assertNotIn("CHAPTER 06", md)
+        self.assertNotIn("윤곽 민사소송법", md)
+        self.assertIn("### 044 논점 5", md)
+
+
 class 스캔본(unittest.TestCase):
     """실물 교재의 꼴: 종이 그림 + OCR 텍스트 레이어.
 

@@ -13,6 +13,7 @@ import re
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from .model import is_generated
 from .structure import Block, render
 
 _SAFE = re.compile(r"[^\w가-힣]+")
@@ -200,7 +201,7 @@ def write(parts, out_dir, prof, parser, validation="PENDING",
         for old in sorted(out.glob("*.md")):
             if old.name in keep:
                 continue
-            if _ours(old):
+            if is_generated(old):
                 old.unlink()
                 removed.append(old.name)
     written = []
@@ -210,15 +211,6 @@ def write(parts, out_dir, prof, parser, validation="PENDING",
                         encoding="utf-8")
         written.append(str(path))
     return written, removed
-
-
-def _ours(path: Path) -> bool:
-    """우리가 만든 파일인가. 사람이 손으로 둔 파일은 건드리지 않는다."""
-    try:
-        head = path.read_text(encoding="utf-8")[:400]
-    except Exception:
-        return False
-    return head.startswith("---") and "\nparser:" in head
 
 
 def _plain(text: str) -> str:

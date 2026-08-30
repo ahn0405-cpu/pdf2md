@@ -109,7 +109,11 @@ class PyMuPDFParser(Parser):
             body_size = self._body_size(doc, idx[::step][:20] or idx[:1])
             self.color_source = self._pick_color_source(doc, idx, color_cfg) \
                 if want_emphasis else "none"
-            opts["running"] = self._detect_running(doc, idx, cfg.get("running", {}))
+            # 머리말·꼬리말은 책 전체의 성질이다. --pages 로 잘라 돌릴 때도
+            # 문서 전체에서 찾아야 한다. 열한 쪽만 보면 그 안에 두어 번밖에
+            # 안 나오는 장 꼬리말을 못 잡고, 그게 장 제목으로 둔갑한다.
+            opts["running"] = self._detect_running(
+                doc, list(range(doc.page_count)), cfg.get("running", {}))
 
             for i in idx:
                 page = doc[i]
@@ -280,7 +284,7 @@ class PyMuPDFParser(Parser):
         for line in lines:
             if line.y1 <= height * opts["header_zone"]:
                 line.zone = "header"
-            elif line.y0 >= height * opts["footer_zone"] and \
+            elif line.y0 >= height * (1 - zone) and \
                     any(rx.search(strip_markup(line.stripped)) for rx in opts["footer_rx"]):
                 line.zone = "header"        # 꼬리말도 본문이 아니다 (§4.1)
             elif running and (line.y1 <= height * zone or line.y0 >= height * (1 - zone)) \
