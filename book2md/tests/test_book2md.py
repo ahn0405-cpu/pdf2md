@@ -716,6 +716,10 @@ class 스캔본(unittest.TestCase):
         removed = (out / "_reports" / "removed_lines.md").read_text(encoding="utf-8")
         self.assertIn("己厂", removed)
         self.assertIn("CHAPTER 6 소송절차 개시", removed)
+        # 각주의 뒷줄은 짧고 번호로 시작하지 않아도 버리지 않는다.
+        # 읽히는 한국어인지로 가른다 (§4.1).
+        self.assertNotIn("다만 그 범위는 따로 본다", removed)
+        self.assertIn("다만 그 범위는 따로 본다", md)
         self.assertIn("sE-8", removed)
 
     def test_로마자를_안_고치면_검증이_잡아낸다(self):

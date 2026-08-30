@@ -96,6 +96,7 @@ class PyMuPDFParser(Parser):
             footer_gap_ratio=float(cfg.get("running", {}).get("footer_gap_ratio", 1.8)),
             repeat_zone=float(cfg.get("running", {}).get("repeat_zone", 0.12)),
             band_max_len=int(cfg.get("running", {}).get("band_max_len", 40)),
+            band_max_hangul=int(cfg.get("running", {}).get("band_max_hangul", 5)),
             strip_small_in_band=bool(cfg.get("running", {}).get(
                 "strip_small_in_band", True)),
             footer_rx=[re.compile(x) for x in
@@ -374,6 +375,14 @@ class PyMuPDFParser(Parser):
             # 벗어나 앉는다. 자리(첫 줄·끝 줄)로도 함께 본다.
             at_top = line.y1 <= height * zone or id(line) == top_id
             in_band = at_top or line.y0 >= height * (1 - zone)
+            # 되풀이 지문은 자리를 가리지 않는다. OCR 이 앞뒤에 잡글자를 붙여
+            # 놓아도('O과 nr CHAPTER 6 소송절차 개시 nr“') 지문이 그 안에
+            # 들어 있으면 머리말이다. 다만 **본문보다 작을 때만** — 진짜
+            # 장 제목('CHAPTER 05 소송물')은 본문보다 크다.
+            if (not in_band and running and line.size < small
+                    and _running_inside(strip_markup(line.stripped), running)):
+                line.zone = "header"
+                continue
             if not in_band:
                 continue
             plain = strip_markup(line.stripped)
@@ -381,18 +390,20 @@ class PyMuPDFParser(Parser):
                 line.zone = "header"        # 머리말·꼬리말은 본문이 아니다 (§4.1)
             elif running and _running_key(plain) in running:
                 line.zone = "header"        # 쪽마다 되풀이되는 줄
-            elif (at_top and opts.get("strip_small_in_band", True)
+            elif (opts.get("strip_small_in_band", True)
                   and line.size < small and len(plain) <= band_len
                   and not _HEADING_LIKE.match(plain)
-                  and not _FOOTNOTE_LIKE.match(plain)):
+                  and not _FOOTNOTE_LIKE.match(plain)
+                  and (at_top or len(_HANGUL.findall(plain))
+                       <= int(opts.get("band_max_hangul", 5)))):
                 # 쪽 맨 위의 작고 짧은 줄. OCR 이 쪽마다 다르게 흘려 놓아
                 # ('O과 己厂—I !') 무늬로도 되풀이로도 못 잡는다. 본문은 이 자리에
                 # 이렇게 작고 짧게 서지 않는다.
                 #
-                # **위에서만** 쓴다. 아래는 각주가 차지하고 있어서, 같은 규칙을
-                # 쓰면 '262) 소유권 확인의 소에서…' 같은 각주와 여러 줄로
-                # 이어지는 각주의 뒷줄을 통째로 버린다. 아래쪽 꼬리말은
-                # 무늬·되풀이·세로 간격(_strip_tail_footer)으로 가른다.
+                # 아래 띠에서는 한글이 거의 없을 때만 쓴다. 아래는 각주가
+                # 차지하고 있어서, 그냥 쓰면 '262) 소유권 확인의 소에서…' 같은
+                # 각주와 여러 줄로 이어지는 각주의 뒷줄을 통째로 버린다.
+                # 각주 뒷줄은 읽히는 한국어고, OCR 이 흘린 꼬리말은 아니다.
                 line.zone = "header"
 
         limit = height * (1.0 - opts["bottom_zone"])
@@ -643,6 +654,21 @@ _HEADING_LIKE = re.compile(
 
 #: 각주는 절대 머리말로 보면 안 된다.
 _FOOTNOTE_LIKE = re.compile(r"^\s*\d{1,4}\s*[).\]]")
+
+_HANGUL = re.compile(r"[가-힣]")
+
+
+def _running_inside(text: str, running: set, min_len: int = 6) -> bool:
+    """되풀이 지문이 이 줄 안에 들어 있는가.
+
+    OCR 은 머리말 앞뒤에 잡글자를 붙인다. 정확히 같기를 요구하면 쪽마다
+    다르게 흘러나온 것을 하나도 못 잡는다. 짧은 지문은 본문에도 우연히
+    들어갈 수 있으므로 길이를 요구한다.
+    """
+    key = _running_key(text)
+    if not key:
+        return False
+    return any(len(r) >= min_len and r in key for r in running)
 
 
 def _running_key(text: str) -> str:
