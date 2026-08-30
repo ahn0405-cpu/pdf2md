@@ -18,6 +18,15 @@ from dataclasses import dataclass
 from .model import Page
 from .patterns import Patterns
 
+#: 줄 맨 앞의 로마자 절 번호. 앞에 강조 표시가 붙어 있을 수 있다.
+#: 뒤에는 '.'(또는 공백)과 한글 제목이 와야 한다.
+_ROMAN_HEAD = re.compile(
+    r"^(?:[=*]{2})?\s*(?P<num>[IVXlN|Ⅰ-Ⅹ¡ν씨０-９0-9]{1,5})"
+    r"(?:\s*[.,·]\s*|\s+)(?=[가-힣])")
+
+#: 제N죄/제N좌 → 제N조 (조문번호 안에서만)
+_ARTICLE_OCR = re.compile(r"제\s*(\d+)\s*[죄좌](?![가-힣])")
+
 #: '1 .문제점' 처럼 번호와 마침표 사이가 벌어진 것. 줄 앞에서만 고친다.
 _ITEM_SPACE = re.compile(r"^(\s*(?:[=*]{2})?\s*[0-9IVXivx]{1,4})\s+([.)])")
 
@@ -54,6 +63,9 @@ class Normalizer:
         self.collapse = bool(n.get("collapse_spaces", True))
         self.fix_dates = bool(n.get("fix_dates", True))
         self.item_space = bool(n.get("item_number_space", True))
+        self.roman = _roman_table(n.get("roman_heads", {}))
+        self.article_ocr = bool(n.get("article_ocr", True))
+        self.case_sep = _case_sep_rx(cfg, n.get("case_inner_seps", []))
         self.date_hangul = n.get("date_trailing_hangul", "warn")
         self.stars = "".join(cfg["preserve"]["star"]["chars"])
         self.allowed = _allowed_set(cfg.get("noise_scan", {}))
@@ -84,8 +96,12 @@ class Normalizer:
         text = self._corrections(text, page_no, changes)
         text = self._mnemonic_brackets(text, page_no, changes)
         text = self._noise(text, page_no, changes)
+        text = self._case_seps(text, page_no, changes)
         text = self._cases(text, page_no, changes)
+        text = self._roman_head(text, page_no, changes)
         text = self._articles(text)
+        if self.article_ocr:
+            text = _ARTICLE_OCR.sub(lambda m: f"제{m.group(1)}조", text)
         if self.item_space:
             text = _ITEM_SPACE.sub(r"\1\2", text)
         if self.fix_dates:
@@ -146,6 +162,23 @@ class Normalizer:
         return text
 
     # ── 사건번호 둘레 정리 (§2.1) ─────────────────────────────────
+    def _case_seps(self, text: str, page_no: int, changes: list[Change]) -> str:
+        """사건번호 안에 낀 콜론 따위를 지운다 (§P1-1).
+
+        '96다:30113' 은 사건번호 정규식이 통째로 빗나간다. 부호와 일련번호
+        사이에서만 지우므로 '판시: 30113' 같은 본문은 건드리지 않는다.
+        """
+        if not self.case_sep:
+            return text
+
+        def sub(m: re.Match) -> str:
+            fixed = m.group("head") + m.group("serial")
+            changes.append(Change(page_no, "case_sep", m.group(0), fixed,
+                                  _ctx(text, m.start(), m.end())))
+            return fixed
+
+        return self.case_sep.sub(sub, text)
+
     def _cases(self, text: str, page_no: int, changes: list[Change]) -> str:
         """사건번호를 하나씩 훑으며 앞뒤 괄호·내부 공백·별표를 바로잡는다."""
         out, cursor = [], 0
@@ -188,6 +221,28 @@ class Normalizer:
                 cursor += cm.end()
         out.append(text[cursor:])
         return "".join(out)
+
+    # ── 로마자 절 번호 되살리기 (§P0-1) ──────────────────────────
+    def _roman_head(self, text: str, page_no: int, changes: list[Change]) -> str:
+        """줄 맨 앞의 로마자가 소문자 L 로 흘러나온 것을 되돌린다.
+
+        'Ill. 중복소제기' 가 헤딩으로 안 잡히면 그 절 전체가 목차에서 사라진다.
+        **줄 맨 앞 + 뒤에 '.' 또는 공백 + 한글 제목**일 때만 고친다. 문장 속
+        'l' 을 건드리면 본문이 망가진다.
+        """
+        if not self.roman:
+            return text
+        m = _ROMAN_HEAD.match(text)
+        if not m:
+            return text
+        raw = m.group("num")
+        fixed = self.roman.get(raw)
+        if not fixed or fixed == raw:
+            return text
+        out = text[:m.start("num")] + fixed + text[m.end("num"):]
+        changes.append(Change(page_no, "roman", raw, fixed, _ctx(text, m.start("num"),
+                                                                m.end("num"))))
+        return out
 
     # ── 조문 공백 (§4.1) ─────────────────────────────────────────
     def _articles(self, text: str) -> str:
@@ -271,3 +326,26 @@ def _ctx(text: str, start: int, end: int, width: int = 30) -> str:
     left = text[max(0, start - width):start]
     right = text[end:end + width]
     return f"…{left}〖{text[start:end]}〗{right}…"
+
+
+def _case_sep_rx(cfg: dict, seps) -> "re.Pattern | None":
+    """연도+부호 뒤, 일련번호 앞에 낀 구분자만 잡는 정규식."""
+    seps = [s for s in (seps or []) if s]
+    if not seps:
+        return None
+    suffixes = sorted(cfg["preserve"]["case_suffixes"], key=len, reverse=True)
+    alt = "|".join(re.escape(s) for s in suffixes)
+    cls = "[" + re.escape("".join(seps)) + "]"
+    return re.compile(
+        rf"(?<![0-9A-Za-z])(?P<head>\d{{2,4}}[ \t]*(?:{alt}))[ \t]*{cls}[ \t]*"
+        rf"(?P<serial>\d+)(?![0-9])")
+
+
+def _roman_table(spec: dict) -> dict:
+    """{오인식 글자: 바른 로마자} 표를 만든다."""
+    table = {}
+    for good, bad_list in (spec or {}).items():
+        table[str(good)] = str(good)
+        for bad in bad_list or []:
+            table[str(bad)] = str(good)
+    return table

@@ -239,30 +239,42 @@ class PyMuPDFParser(Parser):
                     bold = bool(span["flags"] & _BOLD_FLAG) or "Bold" in span.get("font", "")
                     small = span["size"] < body_size * opts["sup_ratio"]
                     raised = base - span["origin"][1] > body_size * opts["sup_rise"]
-                    if sampler is not None:
-                        hexed, _ = sampler.classify(span["bbox"])
-                        key = None
-                        if hexed:
-                            rgb = tuple(int(hexed[j:j + 2], 16) for j in (1, 3, 5))
-                            key = self.palette.add(rgb, raw, page_no)
-                        else:
-                            self.palette.total_spans += 1
-                    else:
-                        key = self.palette.add(rgb, raw, page_no) if self.palette else None
-
                     if small and raised and _DIGITS.match(raw.strip()):
                         # 확실한 각주 참조. 그 자리에서 [^n] 로 박는다 (§2.5)
                         n = int(raw.strip())
                         pieces.append(("", f"[^{n}]"))
                         sups.append(n)
                         continue
-                    mark = ""
-                    if want_emphasis:
-                        if key is not None:
-                            mark = self.palette.markup_for(key)
-                        elif bold and is_black(rgb, color_cfg):
-                            mark = color_cfg.get("markup", {}).get("bold", "**")
-                    pieces.append((mark, raw))
+
+                    if sampler is not None:
+                        # 그림에서 색을 읽을 때는 **낱말마다** 판정한다 (§P0-2).
+                        # span 은 OCR 이 멋대로 끊어 놓은 덩어리라 강조 한 낱말이
+                        # 문장 전체를 물들이거나, 반대로 평균에 묻혀 사라진다.
+                        # 이 모드에서는 bold·크기를 판정에 쓰지 않는다 — 스캔본의
+                        # 글자 속성은 OCR 이 지어낸 것이라 근거가 못 된다.
+                        for seg, box in (span.get("_segs") or [(raw, span["bbox"])]):
+                            if box is None or not seg.strip():
+                                pieces.append(("", seg))
+                                continue
+                            hexed, _ = sampler.classify(box)
+                            if hexed:
+                                srgb = tuple(int(hexed[j:j + 2], 16) for j in (1, 3, 5))
+                                key = self.palette.add(srgb, seg, page_no)
+                            else:
+                                key = None
+                                self.palette.total_spans += 1
+                            mark = self.palette.markup_for(key) \
+                                if (want_emphasis and key is not None) else ""
+                            pieces.append((mark, seg))
+                    else:
+                        key = self.palette.add(rgb, raw, page_no) if self.palette else None
+                        mark = ""
+                        if want_emphasis:
+                            if key is not None:
+                                mark = self.palette.markup_for(key)
+                            elif bold and is_black(rgb, color_cfg):
+                                mark = color_cfg.get("markup", {}).get("bold", "**")
+                        pieces.append((mark, raw))
                     sizes.append(span["size"])
                     bolds.append(bold)
 
@@ -371,10 +383,15 @@ def _restore_spaces(spans, gap_ratio: float) -> None:
     스캔본 OCR 레이어는 낱말 사이 공백을 글자로 넣어 주지 않는다. 그대로 두면
     '수량적가분채권을분할청구하는것을말한다' 가 되어 뒤 처리가 못 읽는다.
     글자 상자의 가로 간격이 글자 크기에 견줘 벌어졌으면 낱말 경계로 본다.
+
+    덤으로 span['_segs'] 에 낱말 단위 조각을 (글자, 상자) 로 남긴다. 색을
+    그림에서 읽을 때 span 통째로 판정하면 한 문장에 강조가 한 낱말만 섞여도
+    문장 전체가 강조가 되거나 통째로 날아간다 (§P0-2).
     """
     if gap_ratio <= 0:
         for span in spans:
             span["text"] = _span_text(span)
+            span["_segs"] = _segments(_char_pairs(span))
         return
     prev_x1 = None
     prev_size = 0.0
@@ -382,18 +399,56 @@ def _restore_spaces(spans, gap_ratio: float) -> None:
         chars = span.get("chars")
         if not chars:
             span["text"] = _span_text(span)
+            span["_segs"] = _segments(_char_pairs(span))
             prev_x1, prev_size = span.get("bbox", (0, 0, 0, 0))[2], span.get("size", 0)
             continue
         out = []
         for ch in chars:
             x0, _, x1, _ = ch["bbox"]
             size = span.get("size", prev_size) or prev_size
-            if (prev_x1 is not None and ch["c"] != " " and out[-1:] != [" "]
+            if (prev_x1 is not None and ch["c"] != " " and out[-1:] != [(" ", None)]
                     and x0 - prev_x1 > size * gap_ratio):
-                out.append(" ")
-            out.append(ch["c"])
+                out.append((" ", None))
+            out.append((ch["c"], ch["bbox"]))
             prev_x1, prev_size = x1, size
-        span["text"] = "".join(out)
+        span["text"] = "".join(c for c, _ in out)
+        span["_segs"] = _segments(out)
+
+
+def _char_pairs(span) -> list[tuple[str, tuple | None]]:
+    chars = span.get("chars")
+    if chars:
+        return [(c["c"], c["bbox"]) for c in chars]
+    return [(ch, span.get("bbox")) for ch in _span_text(span)]
+
+
+def _segments(pairs) -> list[tuple[str, tuple | None]]:
+    """(글자, 상자) 목록을 낱말/공백 덩어리로 묶는다.
+
+    공백 덩어리의 상자는 None 이다 — 색을 읽을 것이 없다.
+    """
+    segs: list[tuple[str, tuple | None]] = []
+    buf: list[str] = []
+    box: list[float] | None = None
+    space = None
+    for ch, bbox in pairs:
+        blank = not ch.strip()
+        if space is not None and blank != space:
+            segs.append(("".join(buf), tuple(box) if box else None))
+            buf, box = [], None
+        space = blank
+        buf.append(ch)
+        if not blank and bbox:
+            if box is None:
+                box = list(bbox)
+            else:
+                box[0] = min(box[0], bbox[0])
+                box[1] = min(box[1], bbox[1])
+                box[2] = max(box[2], bbox[2])
+                box[3] = max(box[3], bbox[3])
+    if buf:
+        segs.append(("".join(buf), tuple(box) if box else None))
+    return segs
 
 
 def _merge_same_line(lines, overlap: float, max_gap: float = 1e9):
@@ -528,11 +583,25 @@ def _render(pieces) -> str:
             out.append(run_text)
         run_mark, run_text = "", ""
 
+    # 낱말마다 색을 읽으면 강조 사이에 공백 조각이 낀다 (§P0-2). 공백만으로
+    # 덩어리를 끊으면 '==확장의== ==뜻을==' 이 되므로, 공백은 붙들어 두었다가
+    # 앞뒤 마크업이 같을 때만 덩어리 안으로 넣는다.
+    pending = ""
     for mark, text in pieces:
+        if not text:
+            continue
+        if not text.strip():
+            pending += text
+            continue
         if mark == run_mark:
-            run_text += text
+            run_text += pending + text
         else:
             flush()
+            if pending:
+                out.append(pending)
             run_mark, run_text = mark, text
+        pending = ""
     flush()
+    if pending:
+        out.append(pending)
     return "".join(out)

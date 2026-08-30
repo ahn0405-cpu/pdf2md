@@ -21,7 +21,7 @@ from .patterns import Patterns
 
 _SIDE = re.compile(r"s[A-Z]-\d{1,4}")
 _EMPH = re.compile(r"==([^=\n]{1,200})==")
-_HEAD = re.compile(r"^(#{1,6})\s+(.*)$")
+_HEAD = re.compile(r"^(#{1,6})\s+(.*)$", re.M)
 _FM = re.compile(r"^---\n.*?\n---\n", re.S)
 _STUDY = ("학설", "判例", "판례", "검토")
 
@@ -109,6 +109,10 @@ def validate(root, cfg: dict, baseline: dict | None = None) -> Result:
     _sidenotes(res, cfg, body_by_file)
     _footnotes(res, pat, body_by_file, bool((baseline or {}).get("partial")))
     _structure(res, body_by_file)
+    _outline(res, text_by_file)
+    _roman_flow(res, body_by_file)
+    _emphasis_pages(res, cfg, baseline)
+    _mnemonic_articles(res, cfg, pat, body_by_file)
     _noise(res, cfg, whole, baseline)
     _extraction_qa(res, cfg, body_by_file)
     _frontmatter(res, pat, text_by_file)
@@ -367,6 +371,110 @@ def _structure(res, bodies):
                     "학설은 있는데 判例/검토가 없다 (학판검 세트 누락 의심)", "", path.name)
     res.counts["empty_sections"] = empty
     res.counts["heading_jumps"] = jumps
+
+
+# ── V1 목차 ↔ 헤딩 대조 ─────────────────────────────────────────
+def _outline(res, texts):
+    """맨 앞 목차 줄에 적힌 항목이 헤딩으로 다 서 있는가.
+
+    '의의 - 소송물 - 시효중단 - 기판력' 처럼 저자가 첫 줄에 절 이름을 늘어놓는다.
+    그중 하나가 헤딩으로 안 잡혔다면 그 절은 문단 속에 묻힌 것이다. 뒤 AI 가
+    목차별 요약을 할 때 통째로 빠지므로 FAIL 로 잡는다.
+    """
+    missing_total = 0
+    for path, text in texts.items():
+        m = _FM.match(text)
+        if not m:
+            continue
+        head, body = m.group(0), text[m.end():]
+        om = re.search(r"^outline: \[(.*)\]$", head, re.M)
+        if not om:
+            continue
+        wanted = [x.strip().strip('"') for x in om.group(1).split(",") if x.strip()]
+        joined = " ".join(_key(t) for _, t in _HEAD.findall(body))
+        missing = [w for w in wanted if _key(w) and _key(w) not in joined]
+        if missing:
+            missing_total += len(missing)
+            res.add("FAIL", "5.7 목차",
+                    f"목차에 있는데 헤딩이 없다: {', '.join(missing[:8])}", "", path.name)
+    res.counts["outline_missing"] = missing_total
+
+
+def _key(text: str) -> str:
+    """헤딩 대조용 열쇠. 마크업·번호·공백을 털어낸 알맹이만."""
+    text = re.sub(r"[=*`]+", "", text or "")
+    text = re.sub(r"^\s*[0-9IVXivx]{1,5}\s*[.)]?\s*", "", text)
+    return re.sub(r"\s+", "", text).strip()
+
+
+# ── V5 로마자 절 번호가 이어지는가 ──────────────────────────────
+def _roman_flow(res, bodies):
+    """I → II → III 가 건너뛰면 그 절이 헤딩으로 안 잡힌 것이다 (WARN).
+
+    OCR 이 III 을 Ill 로 흘리면 딱 그 번호만 빠진다. 그래서 번호가 튀는 것은
+    거의 언제나 유실 신호다. 다만 원본이 원래 건너뛰는 일도 있어 WARN 이다.
+    """
+    order = ["I", "II", "III", "IV", "V", "VI", "VII", "VIII", "IX", "X"]
+    gaps = 0
+    for path, text in bodies.items():
+        seen = []
+        for _, title in _HEAD.findall(text):
+            mm = re.match(r"^\s*(?:[=*`]+)?\s*([IVX]{1,5})\s*[.)]", title)
+            if mm and mm.group(1) in order:
+                seen.append(mm.group(1))
+        for a, b in zip(seen, seen[1:]):
+            if order.index(b) > order.index(a) + 1:
+                gaps += 1
+                res.add("WARN", "5.7 로마자",
+                        f"절 번호가 {a} → {b} 로 건너뛴다. 사이 번호가 헤딩으로 "
+                        f"안 잡혔을 수 있다.", "", path.name)
+    res.counts["roman_gaps"] = gaps
+
+
+# ── V3 표준판례 쪽의 강조 개수 ──────────────────────────────────
+def _emphasis_pages(res, cfg, baseline):
+    """표준판례가 있는 쪽인데 강조가 거의 없으면 색을 못 읽은 것이다.
+
+    본문은 멀쩡해 보여도 답안 현출부가 통째로 사라진 것이라 FAIL 이다.
+    """
+    base = baseline or {}
+    emph = base.get("emphasis_by_page")
+    pages = base.get("standard_pages")
+    if emph is None or pages is None:
+        return
+    need = int(cfg["validation"].get("fail_on", {})
+               .get("emphasis_per_standard_page", 5))
+    thin = [(p, emph.get(str(p), 0)) for p in pages if emph.get(str(p), 0) < need]
+    res.counts["standard_pages"] = len(pages)
+    res.counts["emphasis_thin_pages"] = len(thin)
+    res.counts["emphasis_total"] = sum(emph.values())
+    if thin:
+        head = ", ".join(f"p.{p}({n})" for p, n in thin[:12])
+        res.add("FAIL", "5.4 강조",
+                f"표준판례가 있는데 강조(==)가 {need}개 미만인 쪽 {len(thin)}곳: "
+                f"{head}{' …' if len(thin) > 12 else ''}. "
+                f"`preserve.color.chroma_min`·`min_ratio` 를 낮추고 "
+                f"`_reports/palette.md` 의 예문을 확인할 것.")
+
+
+# ── V4 조문번호가 두문자로 새어 들어갔는가 ──────────────────────
+def _mnemonic_articles(res, cfg, pat, bodies):
+    """`제265조` 같은 조문번호가 두문자 백틱 안에 있으면 안 된다 (§P1-2).
+
+    두문자는 답안에 그대로 옮겨 적는 암기 문자열이다. 조문번호가 섞이면 뒤
+    AI 가 그것을 암기 대상으로 오해한다.
+    """
+    rx = re.compile(cfg["preserve"]["mnemonic"].get(
+        "article_pattern", r"^제?\s*\d+\s*조"))
+    bad = 0
+    for path, text in bodies.items():
+        for m in re.finditer(r"`\[([^\]\n]{1,60})\]`", text):
+            if rx.match(m.group(1).strip()):
+                bad += 1
+                res.add("FAIL", "5.3 두문자",
+                        f"조문번호가 두문자로 잡혔다: `[{m.group(1)}]`",
+                        _ctx(text, m.start(), m.end()), path.name)
+    res.counts["mnemonic_articles"] = bad
 
 
 # ── 잔여 노이즈 (§5.8 WARN) ──────────────────────────────────────

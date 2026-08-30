@@ -57,7 +57,11 @@ class 사건번호(unittest.TestCase):
         self.assertEqual(PAT.case_problems(m), [])
         m = PAT.case.search("74카1557")
         self.assertEqual(PAT.case_problems(m), [])
-        m = PAT.case.search("74초1557")          # 알려진 목록에 없는 부호
+        m = PAT.case.search("74초1557")          # 알려진 부호 (§P1-1 로 추가)
+        self.assertEqual(PAT.case_problems(m), [])
+        m = PAT.case.search("74인1557")          # 알려진 목록에 없는 부호
+        self.assertTrue(PAT.case_problems(m))
+        m = PAT.case.search("1899다1557")        # 연도가 범위 밖
         self.assertTrue(PAT.case_problems(m))
 
 

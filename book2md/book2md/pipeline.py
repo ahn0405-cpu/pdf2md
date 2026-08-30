@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import json
+import re
 from dataclasses import asdict
 from pathlib import Path
 
@@ -21,6 +22,29 @@ from .structure import Structurer, Block, render
 from .validate import validate, reports as validation_reports, load_baseline
 
 STAGES = ["extract", "normalize", "structure", "split", "validate"]
+
+
+def _emphasis_by_page(blocks, cfg) -> tuple[dict, list]:
+    """쪽마다 강조(==)가 몇 군데인지, 표준판례가 있는 쪽은 어디인지 (§V3).
+
+    저자는 표준판례 판시를 색으로 칠해 두었다. 그 쪽에 강조가 거의 없으면
+    색을 못 읽은 것이다 — 본문은 멀쩡해 보여도 답안 현출부가 통째로 사라진
+    셈이라 그냥 넘어가면 안 된다.
+    """
+    mark = cfg["preserve"]["color"].get("markup", {}).get("emphasis", "==")
+    rx = re.compile(re.escape(mark) + r".+?" + re.escape(mark), re.S)
+    emph: dict[str, int] = {}
+    standard: set[int] = set()
+    for b in blocks:
+        page = int(b.page or 0)
+        if not page:
+            continue
+        n = len(rx.findall(b.text or ""))
+        if n:
+            emph[str(page)] = emph.get(str(page), 0) + n
+        if any(c.get("standard") for c in (b.cases or [])):
+            standard.add(page)
+    return emph, sorted(standard)
 
 
 class Pipeline:
@@ -123,7 +147,9 @@ class Pipeline:
             st.feed(page, found)
             pages += 1
         blocks = st.finish()
-        self._update_baseline(absorbed=st.absorbed_chars, line_chars=st.seen_chars)
+        emph, standard = _emphasis_by_page(blocks, self.cfg)
+        self._update_baseline(absorbed=st.absorbed_chars, line_chars=st.seen_chars,
+                              emphasis_by_page=emph, standard_pages=standard)
         with open(self.blocks_file, "w", encoding="utf-8") as fh:
             for b in blocks:
                 fh.write(json.dumps(asdict(b), ensure_ascii=False) + "\n")

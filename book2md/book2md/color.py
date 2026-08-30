@@ -172,15 +172,16 @@ class ImageColorSampler:
     500쪽짜리에서 파이썬 반복이 수억 번 돌아 못 쓴다.
     """
 
-    #: 격자 한 칸의 크기(pt). 글자 높이(8~11pt)보다 충분히 작아야 한다.
-    CELL = 3.0
+    #: 격자 한 칸의 기본 크기(pt). 낱말 상자보다 충분히 작아야 한다.
+    CELL = 1.5
 
     def __init__(self, page, cfg: dict):
         self.cfg = cfg
         self.dpi = _pick_dpi(page, cfg)
         self.ink_max = int(cfg.get("ink_max", 205))
-        self.chroma_min = int(cfg.get("chroma_min", 42))
-        self.min_ratio = float(cfg.get("min_ratio", 0.34))
+        self.chroma_min = int(cfg.get("chroma_min", 30))
+        self.min_ratio = float(cfg.get("min_ratio", 0.20))
+        self.CELL = float(cfg.get("grid_cell", self.CELL))
         self.step = max(1, int(cfg.get("pixel_step", 2)))
         self.scale = self.dpi / 72.0
         self._page = page
