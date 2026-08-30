@@ -696,6 +696,7 @@ class 스캔본(unittest.TestCase):
         # 꼬리말은 본문에도 각주에도 들어가지 않는다. 이 꼬리말은 무늬에
         # 하나도 안 맞는다 — 각주와 떨어진 세로 간격으로만 가른다 (§4.1).
         self.assertNotIn("己厂", md)
+        self.assertNotIn("소송절차 개시", md)
         # §P0-1 로마자가 소문자 L 로 흘러나와도 헤딩으로 선다
         self.assertIn("#### II. 소송물", md)
         self.assertIn("#### III. 기판력", md)
@@ -709,6 +710,7 @@ class 스캔본(unittest.TestCase):
         # §P2-1 무엇을 버렸는지 남긴다
         removed = (out / "_reports" / "removed_lines.md").read_text(encoding="utf-8")
         self.assertIn("己厂", removed)
+        self.assertIn("CHAPTER 6 소송절차 개시", removed)
         self.assertIn("sE-8", removed)
 
     def test_로마자를_안_고치면_검증이_잡아낸다(self):
@@ -873,6 +875,41 @@ class 두문자_결정표(unittest.TestCase):
                         "find": "확객시젠", "to": "확객시전"}]), (0, 1))
         # 고친 config 가 여전히 읽힌다
         load_config(cfg_path)
+
+
+
+class 꼬리말_세로간격(unittest.TestCase):
+    """§4.1 — 긴 각주의 뒷줄을 꼬리말로 잘못 버리지 않는다"""
+
+    @staticmethod
+    def _lines(spec):
+        return [Line(text=t, size=7.0, y0=y, y1=y + 8) for y, t in spec]
+
+    def test_각주와_떨어진_줄만_뗀다(self):
+        from book2md.parsers.pymupdf_native import PyMuPDFParser
+        opts = {"footer_gap_ratio": 1.8, "footer_zone": 0.94}
+        lines = self._lines([
+            (600, "264) 종전 판시는 요건을 달리 보았다."),
+            (612, "다음과 같이 정리된다."),          # 264 의 뒷줄
+            (624, "266) 원고는 2011. 4. 26. 소를 제기하였다."),
+            (636, "3천만 원을 먼저 구하였다."),        # 266 의 뒷줄
+            (690, "O과 己厂—I !"),                   # 뚝 떨어진 꼬리말
+        ])
+        start = PyMuPDFParser._strip_tail_footer(lines, 0, 700, opts)
+        self.assertEqual(start, 0)
+        self.assertEqual([l.zone for l in lines],
+                         ["body", "body", "body", "body", "header"])
+
+    def test_각주만_있으면_아무것도_안_뗀다(self):
+        from book2md.parsers.pymupdf_native import PyMuPDFParser
+        opts = {"footer_gap_ratio": 1.8, "footer_zone": 0.94}
+        lines = self._lines([
+            (600, "264) 종전 판시는 요건을 달리 보았다."),
+            (612, "다음과 같이 정리된다."),
+            (624, "그 경위는 이러하다."),
+        ])
+        PyMuPDFParser._strip_tail_footer(lines, 0, 700, opts)
+        self.assertEqual([l.zone for l in lines], ["body"] * 3)
 
 
 if __name__ == "__main__":

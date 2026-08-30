@@ -94,6 +94,10 @@ class PyMuPDFParser(Parser):
             merge_gap=float(ex.get("line_merge_max_gap", 0.06)),
             footer_zone=float(cfg.get("running", {}).get("footer_zone", 0.94)),
             footer_gap_ratio=float(cfg.get("running", {}).get("footer_gap_ratio", 1.8)),
+            repeat_zone=float(cfg.get("running", {}).get("repeat_zone", 0.12)),
+            band_max_len=int(cfg.get("running", {}).get("band_max_len", 40)),
+            strip_small_in_band=bool(cfg.get("running", {}).get(
+                "strip_small_in_band", True)),
             footer_rx=[re.compile(x) for x in
                        cfg.get("running", {}).get("footer_patterns", [])],
             size_ratio=float(fn.get("size_ratio", 0.92)),
@@ -330,16 +334,29 @@ class PyMuPDFParser(Parser):
         if not lines:
             return
         running = opts.get("running") or set()
-        zone = 0.12
+        zone = float(opts.get("repeat_zone", 0.12))
+        small = body_size * opts["size_ratio"]
+        band_len = int(opts.get("band_max_len", 40))
         for line in lines:
             if line.y1 <= height * opts["header_zone"]:
                 line.zone = "header"
-            elif line.y0 >= height * (1 - zone) and \
-                    any(rx.search(strip_markup(line.stripped)) for rx in opts["footer_rx"]):
-                line.zone = "header"        # 꼬리말도 본문이 아니다 (§4.1)
-            elif running and (line.y1 <= height * zone or line.y0 >= height * (1 - zone)) \
-                    and _running_key(strip_markup(line.text)) in running:
+                continue
+            # 위·아래 띠. 장 제목 띠는 책마다 위에 오기도 하고 아래 오기도 한다.
+            # 아래만 보면 'O과 nr CHAPTER 6 소송절차 개시' 가 본문에 남는다.
+            in_band = line.y1 <= height * zone or line.y0 >= height * (1 - zone)
+            if not in_band:
+                continue
+            plain = strip_markup(line.stripped)
+            if any(rx.search(plain) for rx in opts["footer_rx"]):
+                line.zone = "header"        # 머리말·꼬리말은 본문이 아니다 (§4.1)
+            elif running and _running_key(plain) in running:
                 line.zone = "header"        # 쪽마다 되풀이되는 줄
+            elif (opts.get("strip_small_in_band", True) and line.size < small
+                  and len(plain) <= band_len and not _HEADING_LIKE.match(plain)):
+                # 띠 안의 작고 짧은 줄. OCR 이 쪽마다 다르게 흘려 놓아
+                # ('O과 己厂—I !') 무늬로도 되풀이로도 못 잡는다. 본문은 이 자리에
+                # 이렇게 작고 짧게 서지 않는다.
+                line.zone = "header"
 
         limit = height * (1.0 - opts["bottom_zone"])
         small = body_size * opts["size_ratio"]
@@ -581,6 +598,12 @@ def _merge_same_line(lines, overlap: float, max_gap: float = 1e9):
 #: 글자만 남긴다. OCR 이 쪽번호를 ']6!' 처럼 흘려 놓아 숫자만 빼서는
 #: 'CHAPTER 06 | 소송절차 개시 - ]6!' 이 쪽마다 다른 모양이 된다.
 _RUNNING_KEEP = re.compile(r"[^0-9A-Za-z가-힣一-鿿]+")
+
+
+#: 띠 안에 있어도 제목 꼴이면 남긴다. 논점 번호('046 일부청구')가 쪽 맨 위에
+#: 오는 일이 있다.
+_HEADING_LIKE = re.compile(
+    r"^\s*(?:\d{3}\s|CHAPTER\s*\d|제\s*\d+\s*[편장절관]|[IVX]{1,5}\s*[.)])")
 
 
 def _running_key(text: str) -> str:

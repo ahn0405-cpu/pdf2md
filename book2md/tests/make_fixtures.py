@@ -351,8 +351,11 @@ def scanned_textbook(path: Path):
         (614, "265) 일부 소취하 등이 있을 수 있다. ＜2005다:12345) 참조.", 7.2),
     ]
     # 무늬로는 못 잡는 꼬리말. 실물에서 'O과 nr CHAPTER 6 소송절차 개시 nr“' 와
-    # 'O과 己厂—I !' 로 흘러나왔다. 각주와 떨어진 세로 간격으로 가른다 (§4.1).
+    # 'O과 己厂—I !' 로 흘러나왔다. 무늬로도 되풀이로도 못 잡으므로 띠 안의
+    # 작고 짧은 줄이라는 것으로 가른다 (§4.1).
     footer = (676, "O과 己厂—I !", 7.6)
+    # 쪽 맨 위의 장 제목 띠. 이 책은 위에도 아래에도 띠가 있다.
+    runhead = (62, "O과 nr CHAPTER 6 소송절차 개시 nr", 7.6)
 
     paper = pymupdf.open()
     page = paper.new_page(width=W, height=H)
@@ -366,6 +369,8 @@ def scanned_textbook(path: Path):
         page.insert_text((M, y), text, fontname="wqy", fontsize=size, color=B)
     page.insert_text((M, footer[0]), footer[1], fontname="wqy",
                      fontsize=footer[2], color=B)
+    page.insert_text((M, runhead[0]), runhead[1], fontname="wqy",
+                     fontsize=runhead[2], color=B)
     pix = page.get_pixmap(dpi=200)
     paper.close()
 
@@ -381,6 +386,8 @@ def scanned_textbook(path: Path):
         out.insert_text((M, y), text, fontname="wqy", fontsize=size, render_mode=3)
     out.insert_text((M, footer[0]), footer[1], fontname="wqy",
                     fontsize=footer[2], render_mode=3)
+    out.insert_text((M, runhead[0]), runhead[1], fontname="wqy",
+                    fontsize=runhead[2], render_mode=3)
     scan.save(str(path))
     scan.close()
 
