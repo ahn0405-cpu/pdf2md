@@ -109,7 +109,8 @@ def validate(root, cfg: dict, baseline: dict | None = None) -> Result:
     _sidenotes(res, cfg, body_by_file)
     _footnotes(res, pat, body_by_file, bool((baseline or {}).get("partial")))
     _structure(res, body_by_file)
-    _outline(res, text_by_file)
+    _outline(res, text_by_file,
+             cfg["validation"].get("severity", {}).get("outline_missing", "WARN"))
     _roman_flow(res, body_by_file)
     _emphasis_pages(res, cfg, baseline)
     _mnemonic_articles(res, cfg, pat, body_by_file)
@@ -374,7 +375,7 @@ def _structure(res, bodies):
 
 
 # ── V1 목차 ↔ 헤딩 대조 ─────────────────────────────────────────
-def _outline(res, texts):
+def _outline(res, texts, level="WARN"):
     """맨 앞 목차 줄에 적힌 항목이 헤딩으로 다 서 있는가.
 
     '의의 - 소송물 - 시효중단 - 기판력' 처럼 저자가 첫 줄에 절 이름을 늘어놓는다.
@@ -396,7 +397,7 @@ def _outline(res, texts):
         if missing and len(missing) < len(wanted):
             # 일부만 헤딩으로 섰다 = 절 목록인데 구멍이 났다. 이것이 §P0-1 의 증상이다.
             missing_total += len(missing)
-            res.add("FAIL", "5.7 목차",
+            res.add(level, "5.7 목차",
                     f"목차에 있는데 헤딩이 없다: {', '.join(missing[:8])}", "", path.name)
         elif missing:
             # 하나도 안 맞는다 = 절 목차가 아니라 문단 목차다
@@ -408,9 +409,14 @@ def _outline(res, texts):
 
 
 def _key(text: str) -> str:
-    """헤딩 대조용 열쇠. 마크업·번호·공백을 털어낸 알맹이만."""
+    """헤딩 대조용 열쇠. 마크업·번호·공백을 털어낸 알맹이만.
+
+    **양쪽을 똑같이 턴다.** OCR 잡글자는 헤딩에만 붙는 게 아니라 목차 띠에도
+    붙는다('仁j 의의'). 한쪽만 다듬으면 둘이 영영 안 만나 없는 불일치를
+    보고한다. 그래서 앞의 한글 아닌 글자는 어느 쪽이든 떼고 견준다.
+    """
     text = re.sub(r"[=*`]+", "", text or "")
-    text = re.sub(r"^\s*[0-9IVXivx]{1,5}\s*[.)]?\s*", "", text)
+    text = re.sub(r"^[^가-힣]{0,6}", "", text)
     return re.sub(r"\s+", "", text).strip()
 
 

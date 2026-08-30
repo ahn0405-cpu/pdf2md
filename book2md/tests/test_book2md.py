@@ -747,16 +747,24 @@ class 스캔본(unittest.TestCase):
         self.assertEqual(verdict, "PASS")
 
     def test_둘_다_끄면_검증이_잡아낸다(self):
-        """§V1 — 안전망까지 없으면 절이 조용히 사라진다. 실제로 그랬다."""
+        """§V1 — 안전망까지 없으면 절이 조용히 사라진다. 실제로 그랬다.
+
+        기본은 WARN 이다. 남은 불일치는 글자를 잃은 것이 아니라 절 제목이
+        헤딩 대신 문단으로 들어간 것이기 때문이다. 조이려면 FAIL 로 바꾼다.
+        """
         import copy
         cfg = copy.deepcopy(CFG)
         cfg["normalize"]["roman_heads"] = {}
         cfg["profiles"]["textbook"]["outline_heading"] = False
         verdict, warn = self._run_with(cfg, "out_nonet")
-        self.assertEqual(verdict, "FAIL")
+        self.assertEqual(verdict, "WARN")
         self.assertIn("목차에 있는데 헤딩이 없다", warn)
         for lost in ("의의", "소송물", "기판력"):
             self.assertIn(lost, warn)
+
+        cfg["validation"].setdefault("severity", {})["outline_missing"] = "FAIL"
+        verdict, _ = self._run_with(cfg, "out_strict")
+        self.assertEqual(verdict, "FAIL")
 
     def test_지난_결과물을_지우고_쓴다(self):
         """옛 파일이 남으면 검증이 같은 내용을 두 번 세어 별표가 2배가 된다."""
