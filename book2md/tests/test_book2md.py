@@ -1041,6 +1041,10 @@ class 사람이_확정한_정정(unittest.TestCase):
     """§4.8 예외 — config.yaml 의 corrections 만 바꾼다"""
 
     def test_원문을_편_사람이_확정해_준_사건번호(self):
+        # 원문의 여는 괄호는 '＜' 로 흘러나온다. 그 복원은 정정보다 나중에
+        # 도므로, 정정에 괄호를 걸면 만나지 못한다.
+        got = norm("유치권을 성립시키는 것은 신의칙에 반한다＜201다84298).")
+        self.assertIn("(2011다84298)", got)
         got = norm("유치권을 성립시키는 것은 신의칙에 반한다(201다84298).")
         self.assertIn("(2011다84298)", got)
         m = PAT.case.search(got)
