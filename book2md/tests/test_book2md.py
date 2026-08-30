@@ -1182,7 +1182,9 @@ chapter: "E"
 parser: pymupdf
 ---
 
-## B-10. [변론관할] `4점`
+## B-10. [변론관할]
+
+본안에 관하여 변론하였다. 설명하시오. (4점)
 
 ### 1. 문제의 소재 `1`
 
@@ -1190,7 +1192,9 @@ parser: pymupdf
 
 관할위반의 항변 없이 본안에 관하여 변론하였다.
 
-## E-2. 」명시적 일부청구, 중복소제기] `14점`
+## E-2. 」명시적 일부청구, 중복소제기]
+
+법정상속분만을 구하는 소를 제기하였다. 설명하시오. (14점)
 
 ### 1. 문제의 소재 `1`
 
@@ -1204,7 +1208,9 @@ parser: pymupdf
 
 ### 4. 사안해결 `3`
 
-## E-5. [일부청구-시효중단] `10점`
+## E-5. [일부청구-시효중단]
+
+전체 손해액 중 일부인 1억 원의 지급을 구하였다. 논하시오. (10점)
 
 ### 1. 문제의 소재 `1`
 
@@ -1212,11 +1218,15 @@ parser: pymupdf
 
 ### 3. 일부청구시 시효중단 범위 `4`
 
-(3) 判例 ==`[일나시 나소시]` `[확객시젠]`== (2019다223723)
+#### (1) 학설
+
+#### (2) 判例 ==`[일나시 나소시]` `[확객시젠]`== (2019다223723)
 
 ### 4. 사안해결 `2.5`
 
-## E-6. [일부청구-기판력, 시효중단] `12점`
+## E-6. [일부청구-기판력, 시효중단]
+
+나머지 대여금의 반환을 구하는 소를 제기하였다. 설명하시오. (12점)
 
 ### 1. 문제의 소재 `1`
 
@@ -1358,7 +1368,7 @@ parser: pymupdf
         self.assertEqual([p.id for p in self.data["dropped"]], ["E-5"])
         real = [p for p in self.data["problems"] if p.id == "E-5"]
         self.assertEqual(len(real), 1)
-        self.assertEqual(len(real[0].answers), 4)
+        self.assertEqual(len([a for a in real[0].answers if a.level == 3]), 4)
         self.assertIn("dropped_toc_rows", self.path.read_text(encoding="utf-8"))
 
     def test_장만_맞으면_절은_사람이_고르게_남긴다(self):
@@ -1386,6 +1396,42 @@ parser: pymupdf
 
     def test_장까지_붙었으면_짝이_없는_것이_아니다(self):
         self.assertNotIn("B-10", self.doc["unmapped"]["casebook_problems"])
+
+    def test_총점은_제목이_아니라_지문_끝에_있다(self):
+        """실측: '…설명하시오. (14점)'. 제목에서만 찾으면 하나도 못 읽는다."""
+        pts = {p.id: p.points for p in self.data["problems"]}
+        self.assertEqual(pts["E-2"], 14)
+        self.assertEqual(pts["E-5"], 10)
+        self.assertEqual(pts["E-6"], 12)
+
+    def test_답안_목차가_절_제목을_따라가면_근거로_친다(self):
+        """실물 사례집은 사건번호를 거의 안 싣는다. 답안 목차가 가장 세다.
+
+        'E-2 > 3. 중복소제기 해당 여부' ↔ 'III. 중복소제기'
+        """
+        c = self._book("III. 중복소제기", "E-2")
+        row = self._row("III. 중복소제기")
+        self.assertTrue(any("중복소제기" in x
+                            for x in row["evidence"]["answer_outline"]))
+        self.assertEqual(c["role"], "primary")
+
+    def test_짧고_흔한_절_이름으로는_답안_목차를_안_본다(self):
+        """'의의' '내용' '요건' '효과' 는 어느 장에나 있어서 다 걸린다."""
+        from book2md.mapping import Section, Problem, Answer, _ans_hit
+        prob = Problem(id="X-1", title="변론관할", file="y",
+                       answers=[Answer("2. 변론관할의 의의 및 요건", 3.0)])
+        얕은 = Section(chapter="021 변론관할", title="I. 의의", file="x")
+        깊은 = Section(chapter="021 변론관할", title="II. 변론관할", file="x")
+        self.assertEqual(_ans_hit(얕은, prob, CFG), [])
+        self.assertTrue(_ans_hit(깊은, prob, CFG))
+
+    def test_절_제목의_각주_참조를_떼고_본다(self):
+        """실측: '#### VI. 과실상계[^267]' — 알맹이는 '과실상계' 다."""
+        from book2md.mapping import Section
+        sec = Section(chapter="046 일부청구", title="VI. 과실상계[^267]", file="x")
+        self.assertEqual(sec.title, "VI. 과실상계[^267]")
+        from book2md.mapping import _plain
+        self.assertEqual(_plain("VI. 과실상계[^267]"), "VI. 과실상계")
 
     def test_장_제목도_제목_키워드로_본다(self):
         """실물 절 제목은 'I. 의의 / II. 내용' 처럼 정형이라 논점 이름이 없다.

@@ -30,6 +30,8 @@ _POINTS = re.compile(r"^\(?\s*(\d+(?:\.\d+)?)\s*\)?\s*점?$")
 _BRACKET = re.compile(r"[\[［｛{〔【「『」』｝】〕］\]]")
 _ROMAN_LEAD = re.compile(r"^\s*(?:[ⅠⅡⅢⅣⅤⅥⅦⅧⅨⅩ]|[IVX]{1,5}|\d{1,3})\s*[.,·•‧∙・)]\s*")
 _MARKUP = re.compile(r"(?:==|\*\*|`)")
+#: 제목에 붙은 각주 참조. 'VI. 과실상계[^267]' 의 알맹이는 '과실상계' 다
+_FOOTREF = re.compile(r"\[\^\d+\]")
 #: 장 제목 앞 일련번호. '046 일부청구' → '일부청구'
 _CHAP_NUM = re.compile(r"^\s*\d{1,4}[.\s]\s*")
 #: 사례집 목차 쪽. 제목에 점선과 쪽수가 붙는다
@@ -37,7 +39,7 @@ _TOC_DOTS = re.compile(r"\.{4,}|…{2,}")
 
 
 def _plain(text: str) -> str:
-    return _MARKUP.sub("", text or "").strip()
+    return _FOOTREF.sub("", _MARKUP.sub("", text or "")).strip()
 
 
 def _strip_ticked(title: str) -> tuple[str, list[str]]:
@@ -85,12 +87,24 @@ class Section:
 
 @dataclass
 class Answer:
+    """답안 목차 한 줄. 소제목까지 받는다.
+
+    소제목이 기본서 절 제목을 그대로 따라간다 — '(1) 신의칙 의의 및 취지' ↔
+    'I. 의의 및 취지'. 문제 제목만으로는 장까지밖에 못 좁히는데, 이걸 보면
+    절을 고를 수 있다.
+    """
     title: str
     points: float | None = None
+    level: int = 3
+    parent: float | None = None      # 소제목이면 상위 항목의 배점
 
     @property
     def name(self) -> str:
         return _ROMAN_LEAD.sub("", self.title).strip()
+
+    @property
+    def worth(self) -> float | None:
+        return self.points if self.points is not None else self.parent
 
 
 @dataclass
@@ -104,6 +118,8 @@ class Problem:
     cases: set = field(default_factory=set)
     mnemonics: set = field(default_factory=set)
 
+    from_toc: bool = False
+
     @property
     def looks_like_toc(self) -> bool:
         """사례집 앞머리의 목차 쪽에서 온 가짜 문제인가.
@@ -111,13 +127,25 @@ class Problem:
         목차 줄은 제목 뒤에 점선과 쪽수가 붙고 다음 문제까지 한 줄에 이어진다.
         실측: 'D-20. 증서진부확인의 쇠 ......233D-21. 장래이행의 쇠....237'
         """
-        return bool(_TOC_DOTS.search(self.title)) or len(self.title) > 120
+        return (self.from_toc or bool(_TOC_DOTS.search(self.title))
+                or len(self.title) > 120)
 
     @property
     def points_sum(self) -> float | None:
-        """답안 목차 배점의 합. 총점과 어긋나면 배점을 잘못 읽은 것이다 (§M4)."""
-        known = [a.points for a in self.answers if a.points is not None]
+        """답안 목차 배점의 합.
+
+        실물 사례집은 문제 제목에 총점을 적지 않는다. 그래서 이 합이 사실상
+        총점 노릇을 한다. 지침 §M4 의 '합계 vs 총점' 검산은 대조군이 없어
+        돌릴 수 없고, 대신 배점을 못 읽은 항목 수로 갈음한다.
+        """
+        known = [a.points for a in self.answers
+                 if a.level == 3 and a.points is not None]
         return round(sum(known), 2) if known else None
+
+    @property
+    def points_missing(self) -> int:
+        return sum(1 for a in self.answers
+                   if a.level == 3 and a.points is None)
 
     @property
     def keywords(self) -> list[str]:
@@ -214,8 +242,14 @@ def read_textbook(files, pat: Patterns) -> list[Section]:
     return out
 
 
-def read_casebook(files, pat: Patterns) -> list[Problem]:
-    """사례집에서 문제를 뽑는다. 답안 목차와 배점도 함께."""
+def read_casebook(files, pat: Patterns, cfg: dict | None = None) -> list[Problem]:
+    """사례집에서 문제를 뽑는다. 답안 목차와 배점도 함께.
+
+    총점은 제목이 아니라 **문제 지문 끝**에 있다 — '…설명하시오. (14점)'.
+    제목에서만 찾으면 하나도 못 읽는다.
+    """
+    mp = (cfg or {}).get("mapping") or {}
+    total_rx = re.compile(mp["total_points"]) if mp.get("total_points") else None
     out: list[Problem] = []
     for path in files:
         text = path.read_text(encoding="utf-8")
@@ -228,6 +262,10 @@ def read_casebook(files, pat: Patterns) -> list[Problem]:
                 blob = "\n".join(buf)
                 cur.cases = {m.group(0) for m in pat.case.finditer(blob)}
                 cur.mnemonics = set(pat.find_mnemonics(blob))
+                if cur.points is None and total_rx is not None:
+                    hit = total_rx.search(blob)
+                    if hit:
+                        cur.points = float(hit.group(1))
                 out.append(cur)
 
         for line in body.splitlines():
@@ -248,9 +286,23 @@ def read_casebook(files, pat: Patterns) -> list[Problem]:
                 continue
             if cur is not None:
                 if level == 3:
-                    cur.answers.append(Answer(title=title, points=_points_of(marks)))
+                    parent = _points_of(marks)
+                    cur.answers.append(Answer(title=title, points=parent, level=3))
+                elif level == 4:
+                    up = next((a.points for a in reversed(cur.answers)
+                               if a.level == 3), None)
+                    cur.answers.append(Answer(title=title, points=_points_of(marks),
+                                              level=4, parent=up))
                 buf.append(line)
         close()
+
+    # 목차 쪽에서 온 껍데기 — 같은 번호가 두 번 실리면 진짜 쪽이 가려진다
+    seen: dict = {}
+    for p in out:
+        seen[p.id] = seen.get(p.id, 0) + 1
+    for p in out:
+        if seen[p.id] > 1 and not p.answers:
+            p.from_toc = True
     return out
 
 
@@ -289,6 +341,37 @@ def _mn_hit(section: Section, prob: Problem) -> tuple[list[str], list[str]]:
     return same, near
 
 
+def _ans_hit(section: Section, prob: Problem, cfg: dict) -> list[str]:
+    """답안 목차가 기본서 절 제목을 따라가는가.
+
+    실물 사례집의 답안 목차는 기본서 절 구조를 그대로 옮겨 적는다.
+        'E-2 > 3. 일부청구 후 잔부청구 중복소제기 해당 여부' ↔ 'III. 중복소제기'
+    사례집이 판시를 요지로만 압축해 실어 사건번호·두문자가 희박한 실물에서,
+    이것이 가장 판정력이 높은 근거다.
+
+    다만 '의의' '내용' '요건' '효과' 같은 짧은 절 이름은 어느 장에나 있어서
+    다 걸린다. 길이와 뼈대 말로 막는다.
+    """
+    mp = cfg.get("mapping") or {}
+    if not mp.get("answer_outline", True):
+        return []
+    name = section.name
+    flat = re.sub(r"\s+", "", name)
+    if len(flat) < int(mp.get("outline_min_len", 3)):
+        return []
+    deny = {re.sub(r"\s+", "", w) for w in (mp.get("outline_deny") or [])}
+    if flat in deny:
+        return []
+    out = []
+    for a in prob.answers:
+        an = re.sub(r"\s+", "", a.name)
+        if not an or an in deny:
+            continue
+        if flat in an or an in flat:
+            out.append(a.title)
+    return out
+
+
 def _role(section: Section, prob: Problem) -> tuple[str, float | None]:
     """답안 목차의 배점으로 역할을 가른다 (지침 §role).
 
@@ -300,17 +383,19 @@ def _role(section: Section, prob: Problem) -> tuple[str, float | None]:
     for a in prob.answers:
         flat = re.sub(r"\s+", "", a.name)
         if len(name) >= 2 and (name in flat or flat in name):
-            if best is None or (a.points or 0) > (best.points or 0):
+            if best is None or (a.worth or 0) > (best.worth or 0):
                 best = a
-    if best is None or best.points is None:
+    if best is None or best.worth is None:
         return "composite", None
-    known = [a.points for a in prob.answers if a.points is not None]
-    if known and best.points >= max(known):
-        return "primary", best.points
+    pts = best.worth
+    known = [a.points for a in prob.answers
+             if a.level == 3 and a.points is not None]
+    if known and pts >= max(known):
+        return "primary", pts
     total = prob.points or (sum(known) if known else 0)
-    if total and best.points >= total * 0.25:
-        return "composite", best.points
-    return "incidental", best.points
+    if total and pts >= total * 0.25:
+        return "composite", pts
+    return "incidental", pts
 
 
 @dataclass
@@ -322,6 +407,7 @@ class Match:
     cases: list
     mnemonics: list
     near: list
+    outline: list
     role: str
     points: float | None
 
@@ -342,8 +428,18 @@ class Match:
         """
         kw_len = sum(len(re.sub(r"\s+", "", k)) for k in self.keywords)
         ch_len = sum(len(re.sub(r"\s+", "", k)) for k in self.chapter)
-        return (self.score, len(self.cases), len(self.mnemonics),
-                kw_len, ch_len, len(self.near))
+        return (self.score, len(self.outline), len(self.cases),
+                len(self.mnemonics), kw_len, ch_len, len(self.near))
+
+    @property
+    def strong(self) -> bool:
+        """mappings 로 올릴 것인가.
+
+        지침은 score 2 이상을 올리라고 한다. 실물에서는 사례집이 사건번호를
+        거의 안 실어 score 2 가 드물다. 답안 목차가 맞은 것은 그 하나로도
+        판정력이 높아 함께 올린다 — 어차피 사람 승인을 거친다.
+        """
+        return self.score >= 2 or bool(self.outline)
 
 
 @dataclass
@@ -367,7 +463,7 @@ def build(roots, cfg: dict) -> dict:
     pat = Patterns.build(cfg)
     tb_files, cb_files, other = sort_by_source(roots, cfg)
     sections = read_textbook(tb_files, pat)
-    problems = read_casebook(cb_files, pat)
+    problems = read_casebook(cb_files, pat, cfg)
 
     dropped = [p for p in problems if p.looks_like_toc]
     problems = [p for p in problems if not p.looks_like_toc]
@@ -385,12 +481,13 @@ def build(roots, cfg: dict) -> dict:
             kw = _kw_hit(sec, prob)
             cs = sorted(sec.cases & prob.cases)
             mn, near = _mn_hit(sec, prob)
-            if not (kw or cs or mn or near):
+            ans = _ans_hit(sec, prob, cfg)
+            if not (kw or cs or mn or near or ans):
                 continue
             role, pts = _role(sec, prob)
-            m = Match(sec, prob, kw, ck, cs, mn, near, role, pts)
+            m = Match(sec, prob, kw, ck, cs, mn, near, ans, role, pts)
             by_section.setdefault(i, []).append(m)
-            if m.score >= 2:
+            if m.strong:
                 used.add(prob.id)
 
     placed = {(m.section.chapter, m.section.file, m.prob.id)
@@ -431,7 +528,7 @@ def to_yaml(data: dict) -> str:
         ms = matches.get(i, [])
         if not ms:
             continue
-        (strong if max(m.score for m in ms) >= 2 else weak).append((sec, ms))
+        (strong if any(m.strong for m in ms) else weak).append((sec, ms))
 
     def emit(items, indent="  "):
         for sec, ms in items:
@@ -458,16 +555,23 @@ def to_yaml(data: dict) -> str:
             cs = sorted({c for m in ms for c in m.cases})
             mn = sorted({x for m in ms for x in m.mnemonics})
             nr = sorted({x for m in ms for x in m.near})
+            ao = sorted({x for m in ms for x in m.outline})
             L.append(f"{indent}  evidence:")
             L.append(f"{indent}    title_keyword: [" + ", ".join(_q(k) for k in kws) + "]")
             L.append(f"{indent}    chapter_keyword: [" + ", ".join(_q(k) for k in chs) + "]")
             L.append(f"{indent}    shared_cases: [" + ", ".join(_q(c) for c in cs) + "]")
             L.append(f"{indent}    shared_mnemonics: [" + ", ".join(_q(x) for x in mn) + "]")
+            if ao:
+                L.append(f"{indent}    # 답안 목차가 이 절을 그대로 따라간다")
+                L.append(f"{indent}    answer_outline: [" + ", ".join(_q(x) for x in ao) + "]")
             if nr:
                 L.append(f"{indent}    # 한 글자 차이 — 두문자 결정표에서 확정할 것")
                 L.append(f"{indent}    near_mnemonics: [" + ", ".join(_q(x) for x in nr) + "]")
             top = max(m.score for m in ms)
             L.append(f"{indent}  score: {top}")
+            if top < 2 and ao:
+                L.append(f"{indent}  # score 는 지침의 세 근거만 센다. "
+                         f"이 줄은 답안 목차로 올렸다.")
             if top == 2:
                 L.append(f"{indent}  # ⚠️ 근거 부족 — 셋 중 둘만 맞았다")
             L.append(f"{indent}  confirmed: false")
@@ -556,12 +660,15 @@ def review(doc: dict) -> str:
     for m in rows:
         tb = m.get("textbook", {})
         mark = "x" if m.get("confirmed") else " "
+        ao = (m.get("evidence") or {}).get("answer_outline") or []
         books = ", ".join(
             f"{c.get('id')}({_pt(c.get('points'))}, {c.get('role')})"
             for c in (m.get("casebook") or []))
         L.append(f"[{mark}] {tb.get('chapter','')} > {tb.get('section','')}  ← {books}")
         L.append(f"    근거: {_evidence(m)}  [score {m.get('score')}]")
-        if int(m.get("score") or 0) < 3:
+        if int(m.get("score") or 0) < 2 and ao:
+            L.append("    ※ 답안 목차가 이 절을 그대로 따라간다 — 그래서 올렸다")
+        elif int(m.get("score") or 0) < 3:
             L.append("    ⚠️ 근거 부족 — 확인 필요")
         L.append("")
     for m in (doc.get("candidates") or []):
@@ -609,6 +716,9 @@ def _evidence(m: dict) -> str:
     near = e.get("near_mnemonics") or []
     if near:
         parts.append(f"근접 두문자 {len(near)}건")
+    ao = e.get("answer_outline") or []
+    if ao:
+        parts.append(f"답안 목차 {len(ao)}건")
     return " / ".join(parts)
 
 
@@ -646,10 +756,15 @@ def validate(doc: dict) -> tuple[list, list]:
         tb = (m.get("textbook") or {}).get("file")
         if m.get("confirmed") and tb and not Path(tb).exists():
             fails.append(f"M2 파일이 없다: {tb}")
-    for pid, roles in seen.items():
-        if len(roles) > 1 and any(r != "composite" for r in roles):
-            warns.append(f"M3 문제 {pid} 가 {len(roles)}곳에 쓰였다 "
-                         f"(role: {', '.join(str(r) for r in roles)})")
+    # M3 — 한 문제가 여러 절에 걸리는 것은 이 책에서 정상이다(지침 §근거1 주의).
+    # 문제마다 한 줄씩 내면 나머지 경고가 묻히므로 세어서 한 줄로 낸다.
+    multi = [(pid, roles) for pid, roles in seen.items()
+             if len(roles) > 1 and any(r != "composite" for r in roles)]
+    if multi:
+        multi.sort(key=lambda x: -len(x[1]))
+        head = ", ".join(f"{pid}({len(r)}곳)" for pid, r in multi[:8])
+        warns.append(f"M3 여러 절에 쓰인 문제 {len(multi)}개 — composite 이 아닌 "
+                     f"역할이 섞였다. 많이 쓰인 것부터: {head}")
     for m in (doc.get("chapter_mappings") or []):
         tb = m.get("textbook") or {}
         if m.get("confirmed") and not tb.get("section"):
@@ -661,20 +776,31 @@ def validate(doc: dict) -> tuple[list, list]:
     if left:
         warns.append(f"M1 어디에도 안 붙은 사례집 문제 {len(left)}개: "
                      + ", ".join(str(x) for x in left[:10]))
-    checked = set()
-    for m in rows + (doc.get("candidates") or []):
+    # M4 — 배점 검산. 문제마다 한 줄씩 내면 수백 줄이 되어 나머지를 덮는다.
+    # 세어서 한 줄로 알리고, 어긋난 폭이 큰 것부터 몇 개만 보여준다.
+    checked: dict = {}
+    for m in rows + (doc.get("candidates") or []) + (doc.get("chapter_mappings") or []):
         for c in (m.get("casebook") or []):
-            pid, total, part = c.get("id"), c.get("points"), c.get("points_sum")
-            if pid in checked:
-                continue
-            checked.add(pid)
-            if total is None:
-                warns.append(f"M4 문제 {pid} 의 총점을 못 읽었다 — 배점 오인식 가능")
-            elif part is None:
-                warns.append(f"M4 문제 {pid} 의 답안 배점을 하나도 못 읽었다")
-            elif abs(float(total) - float(part)) > 0.01:
-                warns.append(f"M4 문제 {pid} 의 배점 합계 {part:g} 가 "
-                             f"총점 {float(total):g} 과 다르다 — 어딘가 잘못 읽었다")
+            checked.setdefault(c.get("id"), c)
+    no_total = [k for k, c in checked.items() if c.get("points") is None]
+    no_part = [k for k, c in checked.items()
+               if c.get("points") is not None and c.get("points_sum") is None]
+    gaps = []
+    for k, c in checked.items():
+        t, s_ = c.get("points"), c.get("points_sum")
+        if t is not None and s_ is not None and abs(float(t) - float(s_)) > 0.01:
+            gaps.append((float(t) - float(s_), k, float(t), float(s_)))
+    if no_total:
+        warns.append(f"M4 총점을 못 읽은 문제 {len(no_total)}개: "
+                     + ", ".join(str(x) for x in sorted(no_total)[:10]))
+    if no_part:
+        warns.append(f"M4 답안 배점을 하나도 못 읽은 문제 {len(no_part)}개: "
+                     + ", ".join(str(x) for x in sorted(no_part)[:10]))
+    if gaps:
+        gaps.sort(key=lambda g: -abs(g[0]))
+        head = "; ".join(f"{k} {s_:g}≠{t:g}" for _, k, t, s_ in gaps[:8])
+        warns.append(f"M4 배점 합계가 총점과 다른 문제 {len(gaps)}/{len(checked)}개 "
+                     f"— 배점을 못 읽은 항목이 있다는 뜻이다. 큰 것부터: {head}")
     return fails, warns
 
 
@@ -697,20 +823,23 @@ def debug_report(data: dict, sample: int = 40) -> str:
 
     # 점수 분포
     L += ["## 점수 분포", "", "| score | 쌍 | 절 |", "|---:|---:|---:|"]
-    for s in (3, 2, 1):
-        pairs = sum(1 for m in flat if m.score == s)
-        secs = sum(1 for ms in matches.values() if max(x.score for x in ms) == s)
-        L.append(f"| {s} | {pairs} | {secs} |")
+    for sc in (3, 2, 1):
+        pairs = sum(1 for m in flat if m.score == sc)
+        secs = sum(1 for ms in matches.values() if max(x.score for x in ms) == sc)
+        L.append(f"| {sc} | {pairs} | {secs} |")
+    L.append("")
+    L.append(f"매핑으로 올린 쌍 {sum(1 for m in flat if m.strong)} "
+             f"(score 2 이상이거나 답안 목차가 맞은 것)")
     L.append("")
 
     # 근거 조합
     L += ["## 어느 근거가 걸렸나", "",
-          "| 절 제목 | 장 제목 | 사건번호 | 두문자 | 쌍 |",
-          "|---|---|---|---|---:|"]
+          "| 절 제목 | 장 제목 | 답안 목차 | 사건번호 | 두문자 | 쌍 |",
+          "|---|---|---|---|---|---:|"]
     combo: dict = {}
     for m in flat:
-        key = (bool(m.keywords), bool(m.chapter), bool(m.cases),
-               bool(m.mnemonics or m.near))
+        key = (bool(m.keywords), bool(m.chapter), bool(m.outline),
+               bool(m.cases), bool(m.mnemonics or m.near))
         combo[key] = combo.get(key, 0) + 1
     for key in sorted(combo, key=lambda k: -combo[k]):
         L.append("| " + " | ".join("○" if x else "·" for x in key)
@@ -722,6 +851,7 @@ def debug_report(data: dict, sample: int = 40) -> str:
     L.append("")
     L.append(f"절 제목이 걸린 쌍 {sum(1 for m in flat if m.keywords)} · "
              f"장 제목 {sum(1 for m in flat if m.chapter)} · "
+             f"답안 목차 {sum(1 for m in flat if m.outline)} · "
              f"사건번호 {sum(1 for m in flat if m.cases)} · "
              f"두문자 {sum(1 for m in flat if m.mnemonics)} · "
              f"근접 두문자 {sum(1 for m in flat if m.near and not m.mnemonics)}")

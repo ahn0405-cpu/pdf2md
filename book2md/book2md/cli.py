@@ -156,14 +156,14 @@ def _map_build(args, cfg) -> int:
     if out.parent != Path(""):
         out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(map_mod.to_yaml(data), encoding="utf-8")
-    strong = sum(1 for ms in data["matches"].values()
-                 if max(m.score for m in ms) >= 2)
+    strong = sum(1 for ms in data["matches"].values() if any(m.strong for m in ms))
     weak = len(data["matches"]) - strong
     print(f"기본서 md {len(files['textbook'])}개 → 절 {len(data['sections'])}개 · "
           f"사례집 md {len(files['casebook'])}개 → 문제 {len(data['problems'])}개")
     if files["other"]:
         print(f"※ source: 를 알아볼 수 없어 건너뛴 파일 {len(files['other'])}개")
-    print(f"매핑 {strong}건 · 후보 {weak}건 → {out}")
+    print(f"매핑 {strong}건 · 후보 {weak}건 · "
+          f"장 단위 {len(data.get('chapters') or [])}건 → {out}")
     if args.report:
         rp = Path(args.report)
         rp.write_text(map_mod.debug_report(data), encoding="utf-8")

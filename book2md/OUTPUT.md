@@ -147,10 +147,12 @@ validation: WARN
       points_sum: 10      # 답안 배점의 합 — points 와 다르면 오인식 신호
       role: primary
   evidence:
-    title_keyword: ["시효중단"]
+    title_keyword: ["시효중단"]       # 기본서 절 제목과 맞은 것
+    chapter_keyword: ["일부청구"]     # 기본서 장 제목과 맞은 것
     shared_cases: ["2019다223723", "2018다44114"]
     shared_mnemonics: ["일나시 나소시"]
     near_mnemonics: ["확객시전 ↔ 확객시젠"]   # 한 글자 차이 — 아직 확정 안 됨
+    answer_outline: ["3. 일부청구시 시효중단 범위"]   # 답안 목차가 이 절을 따라간다
   score: 3
   confirmed: false
 ```
@@ -165,3 +167,13 @@ validation: WARN
 
 `near_mnemonics` 는 한 글자 차이라 같은 것으로 **간주**한 두문자다. 어느 쪽이
 옳은지는 정해지지 않았다 — `mnemonic_conflicts-*.md` 를 함께 볼 것.
+
+`score` 는 지침의 세 근거(제목 키워드·사건번호·두문자)만 센다. `answer_outline`
+이 있으면 score 가 1 이어도 매핑으로 올린 것이다 — 실물에서 사례집이 사건번호를
+거의 안 실어 이 근거가 가장 세기 때문이다.
+
+`chapter_mappings` 는 **장까지만 정해진 것**이다. `section: null` 이고 그 장의 절
+목록이 `sections` 에 들어 있다. 사람이 절을 골라 적기 전에는 절 단위로 쓰면 안 된다.
+
+`points` 는 문제 지문 끝의 총점, `points_sum` 은 답안 목차 배점의 합이다. 둘이
+다르면 배점을 못 읽은 항목이 있다는 뜻이라 `section_points` 도 의심해야 한다.
