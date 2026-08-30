@@ -672,6 +672,8 @@ class 스캔본(unittest.TestCase):
         self.assertIn("`[일나시 나소시]`", md)
         # §2.4 그림 픽셀에서 읽은 강조색
         self.assertIn("==확장의 뜻을 밝힌 때에는 전부에 미친다==", md)
+        # §P0-2 한 문장 안에서 앞쪽 낱말만 청색인 판시 본문
+        self.assertIn("==일부청구는 나머지 부분에== 시효중단 효력이 없다(74다1557).", md)
         # §2.5 'NNN)' 꼴 각주: 정의와 본문 참조가 모두 살아 있다
         self.assertIn("[^264]:", md)
         self.assertIn("[^265]", md.split("[^264]:")[0])
@@ -700,6 +702,9 @@ class 스캔본(unittest.TestCase):
         # §P1-2 인용된 조문은 두문자가 아니라 articles 로
         self.assertIn('articles: ["제265조"]', md)
         self.assertNotIn('"제265조"', md.split("articles:")[0])
+        # §P1-1 각주 안의 사건번호도 프론트매터에 들어간다 ('다카' 부호 포함)
+        self.assertIn('id: "87다카1416"', md)
+        self.assertIn('id: "2005다12345"', md)
         # §P2-1 무엇을 버렸는지 남긴다
         removed = (out / "_reports" / "removed_lines.md").read_text(encoding="utf-8")
         self.assertIn("154·윤곽민사소송법", removed)
@@ -760,7 +765,11 @@ class 수정요청_01(unittest.TestCase):
         self.assertEqual(norm("판시는 lll 아니다."), "판시는 lll 아니다.")
 
     def test_다카_부호와_내부_콜론(self):
+        # 사람이 확정해 둔 정정 (config.yaml corrections)
         self.assertEqual(norm("＜96다:30113)"), "(96다30113)")
+        # corrections 에 없는 것도 일반 규칙으로 되살린다
+        self.assertEqual(norm("＜2005다:12345)"), "(2005다12345)")
+        self.assertEqual(norm("판시: 30113 쪽"), "판시: 30113 쪽")   # 본문은 그대로
         m = PAT.case.search("87다카1416")
         self.assertEqual(m.group("suffix"), "다카")     # '다' 로 잘리면 안 된다
         self.assertEqual(PAT.case_problems(m), [])

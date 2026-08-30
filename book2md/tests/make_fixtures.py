@@ -325,8 +325,12 @@ def scanned_textbook(path: Path):
         # 번호와 제목이 다른 줄로 떨어지는 자리
         (317, M,      "3", BLUE, "3"),
         (316, M + 15, ". 判例 [일나시 나소시]", BLUE, ".判例[일나시나소시"),
-        (338, M + 14, "일부청구는 나머지 부분에 시효중단 효력이 없다(74다1557).", B,
-                      "일부청구는나머지부분에시효중단효력이없다＜74다1557)."),
+        # 한 문장 안에서 앞쪽 낱말만 청색이다. 실물의 판시 본문이 이 꼴이라,
+        # span 통째로 판정하면 문장 전체가 강조가 되거나 통째로 사라진다 (§P0-2).
+        (338, M + 14, "일부청구는 나머지 부분에 ", BLUE, "일부청구는나머지부분에"),
+        (338, M + 14 + _width("일부청구는 나머지 부분에 ", 9),
+                      "시효중단 효력이 없다(74다1557).", B,
+                      "시효중단효력이없다＜74다1557)."),
         (364, M,      "4", BLUE, "4"),
         (363, M + 15, ". 검토", BLUE, ".검토"),
         (385, M + 14, "확장의 뜻을 밝힌 때에는 전부에 미친다", BLUE,
@@ -341,8 +345,10 @@ def scanned_textbook(path: Path):
                       "6월내에조치를취할수있다＜2019다223723)."),
     ]
     foots = [
-        (600, "264) 즉, 종전 판시에 요건을 추가한 것이다.", 7.2),
-        (614, "265) 일부 소취하 등이 있을 수 있다.", 7.2),
+        # 각주에만 나오는 사건번호. 각주가 추출 대상에서 빠지면 프론트매터
+        # cases 에서 통째로 사라진다 (§P1-1). '다카' 부호와 내부 콜론까지 함께.
+        (600, "264) 즉, 종전 판시에 요건을 추가한 것이다(87다카1416*).", 7.2),
+        (614, "265) 일부 소취하 등이 있을 수 있다. ＜2005다:12345) 참조.", 7.2),
     ]
     footer = (676, "154·윤곽민사소송법", 7.6)
 
@@ -367,8 +373,8 @@ def scanned_textbook(path: Path):
     out.insert_font(fontname="wqy", fontfile=FONT)
     for y, x, shown, _, ocr in rows:
         _place_ocr(out, x, y, shown, ocr, 9)
-    out.insert_text((W - M - 24, 170), "sE-8", fontname="wqy", fontsize=7, render_mode=3)
-    out.insert_text((M + 90, 196), "sE-9", fontname="wqy", fontsize=7, render_mode=3)
+    out.insert_text((W - M - 24, 244), "sE-8", fontname="wqy", fontsize=7, render_mode=3)
+    out.insert_text((M + 90, 268), "sE-9", fontname="wqy", fontsize=7, render_mode=3)
     for y, text, size in foots:
         out.insert_text((M, y), text, fontname="wqy", fontsize=size, render_mode=3)
     out.insert_text((M, footer[0]), footer[1], fontname="wqy",
