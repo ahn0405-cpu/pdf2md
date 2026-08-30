@@ -1138,5 +1138,274 @@ class 목차로_제목_되찾기(unittest.TestCase):
         self.assertIn("> ### ☑ 즉시항고와 통상항고", out)
 
 
+class 매핑(unittest.TestCase):
+    """mapping_생성지침.md — 기본서 ↔ 사례집 잇기.
+
+    지침의 「알려진 매핑」(046 일부청구) 을 정답지로 삼는다. 한 문제가 두 절에
+    걸리고(E-6 → IV·V), 한 절에 여러 문제가 붙는(IV ← E-5·E-6·E-7) 1:N·N:1 이
+    둘 다 나오는지를 본다.
+    """
+
+    TEXTBOOK = """---
+source: 기본서
+chapter: "046 일부청구"
+parser: pymupdf
+---
+
+## CHAPTER 046 일부청구
+
+#### I. 의의
+
+일부청구란 수량적으로 가분인 채권의 일부만 구하는 것이다.
+
+#### II. 소송물
+
+(1) 判例 ==`[일외별명일]`== 로 본다.
+
+#### III. 중복소제기
+
+(1) 判例 ==`[명일동내]`== (84다552) (95다46319)
+
+#### IV. 시효중단 `(11)`
+
+(1) 원칙 ==`[일나시 나소시]`== (74다1557)
+(2) 확장 ==`[확객시전]`== (2019다223723) (2018다44114)
+
+#### V. 기판력 `(15)`
+
+(1) ==`[종확나시]`== (2018다44114)
+"""
+
+    CASEBOOK = """---
+source: 사례집
+chapter: "E"
+parser: pymupdf
+---
+
+## E-2. 」명시적 일부청구, 중복소제기] `14점`
+
+### 1. 문제의 소재 `1`
+
+### 2. 일부청구의 소송물 `5`
+
+(2) 判例 ==`[일외별명일]`==
+
+### 3. 중복소제기 해당 여부 `5`
+
+(1) 判例 ==`[명일동내]`== (84다552) (95다46319)
+
+### 4. 사안해결 `3`
+
+## E-5. [일부청구-시효중단] `10점`
+
+### 1. 문제의 소재 `1`
+
+### 2. 일부청구 소송물 `2.5`
+
+### 3. 일부청구시 시효중단 범위 `4`
+
+(3) 判例 ==`[일나시 나소시]` `[확객시젠]`== (2019다223723)
+
+### 4. 사안해결 `2.5`
+
+## E-6. [일부청구-기판력, 시효중단] `12점`
+
+### 1. 문제의 소재 `1`
+
+### 2. 시효중단의 범위 `6`
+
+==`[일나시 나소시]`== (2018다44114)
+
+### 3. 기판력의 객관적 범위 `4`
+
+==`[종확나시]`==
+
+### 4. 사안해결 `1`
+"""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.tmp = Path(tempfile.mkdtemp())
+        (cls.tmp / "기본서").mkdir()
+        (cls.tmp / "사례집").mkdir()
+        (cls.tmp / "기본서" / "45_046일부청구.md").write_text(
+            cls.TEXTBOOK, encoding="utf-8")
+        (cls.tmp / "사례집" / "E_명시적일부청구중복소제기.md").write_text(
+            cls.CASEBOOK, encoding="utf-8")
+        from book2md import mapping as M
+        cls.M = M
+        cls.data = M.build(cls.tmp / "기본서", [cls.tmp / "사례집"], CFG)
+        cls.path = cls.tmp / "mapping.yaml"
+        cls.path.write_text(M.to_yaml(cls.data), encoding="utf-8")
+        cls.doc = M.load(cls.path)
+
+    @classmethod
+    def tearDownClass(cls):
+        shutil.rmtree(cls.tmp, ignore_errors=True)
+
+    def _row(self, section: str) -> dict:
+        for row in (self.doc.get("mappings") or []) + (self.doc.get("candidates") or []):
+            if row["textbook"]["section"] == section:
+                return row
+        self.fail(f"매핑에 없다: {section}")
+
+    def _book(self, section: str, pid: str) -> dict:
+        for c in self._row(section)["casebook"]:
+            if c["id"] == pid:
+                return c
+        self.fail(f"{section} 에 {pid} 가 안 붙었다")
+
+    # ── 읽기 ────────────────────────────────────────────────
+    def test_제목의_배점과_기출연도를_제목에서_떼어낸다(self):
+        """'IV. 시효중단 `(11)`' 이 'IV. 시효중단 (11)' 이 되면 키워드가 안 맞는다."""
+        titles = [s.title for s in self.data["sections"]]
+        self.assertIn("IV. 시효중단", titles)
+        self.assertIn("V. 기판력", titles)
+
+    def test_오인식된_대괄호도_문제제목으로_읽는다(self):
+        """실측: '## E-2. 」명시적 일부청구, 중복소제기]' (지침 §근거1)"""
+        ids = {p.id: p.title for p in self.data["problems"]}
+        self.assertEqual(ids["E-2"], "명시적 일부청구, 중복소제기")
+        self.assertEqual({"E-2", "E-5", "E-6"}, set(ids))
+
+    def test_절마다_사건번호를_따로_센다(self):
+        """프론트매터의 cases 는 파일 전체 것이라 절 대조에 못 쓴다."""
+        by = {s.title: s.cases for s in self.data["sections"]}
+        self.assertEqual(by["III. 중복소제기"], {"84다552", "95다46319"})
+        self.assertNotIn("84다552", by["IV. 시효중단"])
+
+    # ── 근거와 점수 ──────────────────────────────────────────
+    def test_제목_키워드는_부분_일치도_인정한다(self):
+        """'명시적 일부청구' ⊃ '일부청구' (지침 §근거1-4)"""
+        row = self._row("III. 중복소제기")
+        self.assertIn("중복소제기", row["evidence"]["title_keyword"])
+        self.assertEqual(row["score"], 3)
+
+    def test_두문자는_한_글자_차이까지_본다(self):
+        """'확객시전' vs '확객시젠' — 오인식이라 완전 일치가 안 된다."""
+        ev = self._row("IV. 시효중단")["evidence"]
+        self.assertIn("확객시전 ↔ 확객시젠", ev["near_mnemonics"])
+
+    def test_근거가_하나뿐이면_후보로만_둔다(self):
+        """score 1 은 mappings 에 올리지 않는다 (지침 §점수와 처리).
+
+        II. 소송물은 두문자 하나만 겹친다. 제목 키워드도 사건번호도 없다.
+        """
+        secs = [r["textbook"]["section"] for r in self.doc["candidates"]]
+        self.assertIn("II. 소송물", secs)
+        self.assertEqual(self._row("II. 소송물")["score"], 1)
+        self.assertNotIn("II. 소송물",
+                         [r["textbook"]["section"] for r in self.doc["mappings"]])
+
+    def test_짝이_없는_절은_unmapped_에_남긴다(self):
+        self.assertIn("I. 의의", self.doc["unmapped"]["textbook_sections"])
+
+    # ── 1:N · N:1 ───────────────────────────────────────────
+    def test_한_절에_여러_문제가_붙는다(self):
+        ids = [c["id"] for c in self._row("IV. 시효중단")["casebook"]]
+        self.assertEqual(set(ids), {"E-5", "E-6"})
+
+    def test_한_문제가_두_절에_걸린다(self):
+        """E-6 은 IV. 시효중단과 V. 기판력 양쪽에 걸린다 (지침 §근거1 주의)."""
+        self.assertTrue(self._book("IV. 시효중단", "E-6"))
+        self.assertTrue(self._book("V. 기판력", "E-6"))
+
+    # ── role ────────────────────────────────────────────────
+    def test_최대_배점_항목이면_primary(self):
+        """E-5 는 '3. 시효중단 범위 4점' 이 최대라 IV 의 primary 다."""
+        c = self._book("IV. 시효중단", "E-5")
+        self.assertEqual(c["role"], "primary")
+        self.assertEqual(c["section_points"], 4)
+
+    def test_최대가_아니어도_25퍼센트면_composite(self):
+        """E-6 의 기판력은 4/12 — 최대(6)는 아니지만 25% 는 넘는다."""
+        c = self._book("V. 기판력", "E-6")
+        self.assertEqual(c["role"], "composite")
+        self.assertEqual(c["section_points"], 4)
+
+    def test_25퍼센트_미만이면_incidental(self):
+        """스치듯 언급만 된 절. 노트에 안 써도 된다."""
+        from book2md.mapping import Section, Problem, Answer, _role
+        sec = Section(chapter="c", title="VII. 과실상계", file="x")
+        prob = Problem(id="E-8", title="일부청구, 과실상계", file="y", points=12,
+                       answers=[Answer("1. 일부청구 소송물", 9.0),
+                                Answer("2. 과실상계 여부", 1.0)])
+        self.assertEqual(_role(sec, prob), ("incidental", 1.0))
+
+    def test_동률이면_primary(self):
+        """E-2 의 중복소제기는 5/14 로 소송물(5)과 동률 — 주 논점으로 본다."""
+        self.assertEqual(self._book("III. 중복소제기", "E-2")["role"], "primary")
+
+    def test_배점을_못_찾으면_composite_으로_둔다(self):
+        """어림짐작으로 primary 를 주면 사람이 그냥 넘긴다."""
+        from book2md.mapping import Section, Problem, _role
+        sec = Section(chapter="c", title="IV. 시효중단", file="x")
+        prob = Problem(id="E-9", title="시효중단", file="y")
+        self.assertEqual(_role(sec, prob), ("composite", None))
+
+    # ── 승인 ────────────────────────────────────────────────
+    def test_처음에는_하나도_승인되어_있지_않다(self):
+        """score 3 이어도 자동 승인하지 않는다 (지침 §점수와 처리)."""
+        for row in self.doc["mappings"] + self.doc["candidates"]:
+            self.assertFalse(row["confirmed"])
+
+    def test_절_하나만_골라_승인한다(self):
+        path = self.tmp / "confirm.yaml"
+        path.write_text(self.M.to_yaml(self.data), encoding="utf-8")
+        n = self.M.confirm(path, section="IV. 시효중단")
+        self.assertEqual(n, 1)
+        doc = self.M.load(path)
+        got = {r["textbook"]["section"]: r["confirmed"] for r in doc["mappings"]}
+        self.assertTrue(got["IV. 시효중단"])
+        self.assertFalse(got["III. 중복소제기"])
+
+    def test_승인해도_주석이_남는다(self):
+        """yaml 을 다시 써 내면 '왜 이렇게 판정했는지' 가 날아간다."""
+        path = self.tmp / "keep.yaml"
+        path.write_text(self.M.to_yaml(self.data), encoding="utf-8")
+        self.M.confirm(path, all_=True)
+        text = path.read_text(encoding="utf-8")
+        self.assertIn("confirmed: true 인 것만 노트 생성에 쓴다", text)
+        self.assertNotIn("confirmed: false", text)
+
+    # ── 검증 M1~M4 ──────────────────────────────────────────
+    def test_M4_배점이_맞으면_아무_말도_하지_않는다(self):
+        """E-5 는 1+2.5+4+2.5=10, E-2 는 1+5+5+3=14, E-6 은 1+6+4+1=12."""
+        _, warns = self.M.validate(self.doc)
+        self.assertEqual([w for w in warns if w.startswith("M4")], [])
+
+    def test_M4_가_어긋난_배점을_잡는다(self):
+        doc = {"mappings": [{"casebook": [
+            {"id": "E-5", "points": 10, "points_sum": 8}]}]}
+        _, warns = self.M.validate(doc)
+        self.assertTrue(any("M4" in w and "8" in w and "10" in w for w in warns))
+
+    def test_M3_같은_문제가_두_곳에_쓰이면_알린다(self):
+        _, warns = self.M.validate(self.doc)
+        self.assertTrue([w for w in warns if w.startswith("M3") and "E-6" in w])
+
+    def test_M2_승인된_항목의_파일이_없으면_FAIL(self):
+        doc = {"mappings": [{"confirmed": True,
+                             "textbook": {"file": "없는파일.md"},
+                             "casebook": []}]}
+        fails, _ = self.M.validate(doc)
+        self.assertTrue(any(f.startswith("M2") for f in fails))
+
+    def test_승인_전에는_파일_경로를_따지지_않는다(self):
+        doc = {"mappings": [{"confirmed": False,
+                             "textbook": {"file": "없는파일.md"},
+                             "casebook": []}]}
+        fails, _ = self.M.validate(doc)
+        self.assertEqual(fails, [])
+
+    # ── review ──────────────────────────────────────────────
+    def test_review_는_사람이_훑을_수_있는_꼴이다(self):
+        out = self.M.review(self.doc)
+        self.assertIn("[ ] 046 일부청구 > IV. 시효중단", out)
+        self.assertIn("E-5(10점, primary)", out)
+        self.assertIn("[!] 046 일부청구 > II. 소송물", out)
+        self.assertIn("⚠️ 근거", out)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

@@ -129,3 +129,39 @@ validation: WARN
 `_work/<파일>/02_changes.jsonl` 에 **정규화가 손댄 자리가 전부** 남아 있다
 (`＜`→`(` 복원, 두문자 괄호 복구, 날짜 표준화, 사람이 지정한 정정).
 무엇이 어떻게 바뀌었는지 되짚을 수 있다.
+
+## mapping.yaml — 어느 절이 어느 문제로 나왔나
+
+`mapping build` 로 따로 만든다. 기본서 절과 사례집 문제를 잇는 표다.
+
+```yaml
+- textbook:
+    chapter: "046 일부청구"
+    section: "IV. 시효중단"
+    file: "output/기본서/45_046일부청구.md"
+  casebook:
+    - id: "E-5"
+      title: "일부청구-시효중단"
+      points: 10          # 문제 총점
+      section_points: 4   # 이 절에 걸린 답안 항목의 배점
+      points_sum: 10      # 답안 배점의 합 — points 와 다르면 오인식 신호
+      role: primary
+  evidence:
+    title_keyword: ["시효중단"]
+    shared_cases: ["2019다223723", "2018다44114"]
+    shared_mnemonics: ["일나시 나소시"]
+    near_mnemonics: ["확객시전 ↔ 확객시젠"]   # 한 글자 차이 — 아직 확정 안 됨
+  score: 3
+  confirmed: false
+```
+
+**`confirmed: true` 인 것만 쓸 것.** `score: 3` 도, `mappings` 에 올라 있는
+것도 그 자체로는 승인이 아니다. `candidates` 는 근거가 하나뿐이라 더 약하다.
+
+`role` 은 배점으로 가른 것이다. `primary` 는 그 절이 문제의 주 논점,
+`composite` 는 다른 논점과 묶여 나온 것, `incidental` 은 스치듯 언급된 것이라
+노트에 안 써도 된다. **배점을 못 읽었을 때도 `composite`** 이 되므로,
+`section_points: null` 이면 역할이 실제로 판정된 것이 아니다.
+
+`near_mnemonics` 는 한 글자 차이라 같은 것으로 **간주**한 두문자다. 어느 쪽이
+옳은지는 정해지지 않았다 — `mnemonic_conflicts-*.md` 를 함께 볼 것.

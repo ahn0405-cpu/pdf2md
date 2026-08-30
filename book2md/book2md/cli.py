@@ -20,6 +20,7 @@ from pathlib import Path
 from . import diagnose as diag_mod
 from .config import load_config, profile as get_profile
 from .crosscheck import crosscheck, read_decisions, merge_corrections
+from . import mapping as map_mod
 from .parsers import availability, get_parser, pick_parser
 from .pipeline import Pipeline, STAGES
 from .validate import validate as run_validate, reports as validation_reports, load_baseline
@@ -101,11 +102,83 @@ def main(argv=None) -> int:
     pr.add_argument("--profile", default="textbook", help="--lines 에 쓸 프로파일")
     pr.add_argument("--out", help="결과를 이 파일로 저장 (기본: 화면)")
 
+    mp = sub.add_parser("mapping", help="기본서 ↔ 사례집 매핑 (mapping_생성지침.md)")
+    msub = mp.add_subparsers(dest="sub", required=True)
+    mb = msub.add_parser("build", help="근거를 세어 mapping.yaml 을 만든다")
+    mb.add_argument("textbook", help="기본서 md 폴더")
+    mb.add_argument("casebook", nargs="+", help="사례집 md 폴더 (여러 개 가능)")
+    mb.add_argument("-o", "--out", default="mapping.yaml")
+    mr = msub.add_parser("review", help="승인 대기 목록")
+    mr.add_argument("path", nargs="?", default="mapping.yaml")
+    mr.add_argument("--out", help="파일로 저장 (기본: 화면)")
+    mc = msub.add_parser("confirm", help="사람이 검토한 매핑에 confirmed: true 를 찍는다")
+    mc.add_argument("path", nargs="?", default="mapping.yaml")
+    mc.add_argument("--all", dest="all_", action="store_true", help="전부 승인")
+    mc.add_argument("--section", help="이 절만 승인. 예: \"IV. 시효중단\"")
+    mv = msub.add_parser("validate", help="M1~M4 검증")
+    mv.add_argument("path", nargs="?", default="mapping.yaml")
+
     sub.add_parser("parsers", help="쓸 수 있는 파서 보기")
 
     args = ap.parse_args(argv)
     cfg = load_config(args.config)
     return globals()[f"_cmd_{args.cmd.replace('-', '_')}"](args, cfg)
+
+
+# ── mapping (mapping_생성지침.md) ────────────────────────────────
+def _cmd_mapping(args, cfg) -> int:
+    return globals()[f"_map_{args.sub}"](args, cfg)
+
+
+def _map_build(args, cfg) -> int:
+    tb = Path(args.textbook)
+    dirs = [Path(d) for d in args.casebook]
+    for d in [tb, *dirs]:
+        if not d.is_dir():
+            print(f"폴더가 없다: {d}", file=sys.stderr)
+            return 2
+    data = map_mod.build(tb, dirs, cfg)
+    out = Path(args.out)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(map_mod.to_yaml(data), encoding="utf-8")
+    strong = sum(1 for ms in data["matches"].values()
+                 if max(m.score for m in ms) >= 2)
+    weak = len(data["matches"]) - strong
+    print(f"기본서 절 {len(data['sections'])}개 · 사례집 문제 {len(data['problems'])}개")
+    print(f"매핑 {strong}건 · 후보 {weak}건 → {out}")
+    print("**아직 하나도 승인되지 않았다.** `mapping review` 로 보고 "
+          "`mapping confirm` 으로 승인할 것.")
+    return 0
+
+
+def _map_review(args, cfg) -> int:
+    doc = map_mod.load(args.path)
+    text = map_mod.review(doc)
+    if args.out:
+        Path(args.out).write_text(text, encoding="utf-8")
+        print(f"→ {args.out}")
+    else:
+        print(text)
+    return 0
+
+
+def _map_confirm(args, cfg) -> int:
+    if not args.all_ and not args.section:
+        print("--all 이나 --section 중 하나가 있어야 한다.", file=sys.stderr)
+        return 2
+    n = map_mod.confirm(args.path, section=args.section, all_=args.all_)
+    print(f"{n}건을 승인했다 → {args.path}")
+    return 0
+
+
+def _map_validate(args, cfg) -> int:
+    fails, warns = map_mod.validate(map_mod.load(args.path))
+    for f in fails:
+        print(f"[FAIL] {f}")
+    for w in warns:
+        print(f"[WARN] {w}")
+    print(f"\n판정: {'FAIL' if fails else ('WARN' if warns else 'PASS')}")
+    return 1 if fails else 0
 
 
 # ── diagnose ────────────────────────────────────────────────────

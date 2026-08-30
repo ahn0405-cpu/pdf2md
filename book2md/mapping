@@ -1,0 +1,4 @@
+#!/usr/bin/env sh
+# 기본서 ↔ 사례집 매핑. 지침의 명령 이름 그대로 쓰기 위한 실행기.
+#   ./mapping build sources/기본서/ sources/사례집/ -o mapping.yaml
+exec python3 -m book2md mapping "$@"

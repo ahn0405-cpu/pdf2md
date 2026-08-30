@@ -42,6 +42,12 @@ pip install -r requirements.txt          # PyYAML + PyMuPDF
 ./convert validate output
 ./convert crosscheck output/기본서 output/사례집
 
+# 5) 기본서 ↔ 사례집 매핑 (변환이 끝난 뒤)
+./mapping build output/기본서 output/사례집 -o mapping.yaml
+./mapping review mapping.yaml
+./mapping confirm mapping.yaml --section "IV. 시효중단"
+./mapping validate mapping.yaml
+
 # 진단이 "없다" 고 할 때 — 원문 증거를 그대로 뜬다
 ./convert probe 기본서.pdf                    # 괄호·색·도형·옆번호·두문자 후보
 ./convert probe 기본서.pdf --find "시효중단"    # 몇 쪽에 있나 (변환할 장 고르기)
@@ -128,6 +134,49 @@ output/
 ./convert apply-decisions output/_reports/mnemonic_conflicts.md
 ./convert run 기본서.pdf --profile textbook --from normalize
 ```
+
+## 기본서 ↔ 사례집 매핑
+
+두 책은 서로를 보완한다. 판례 **사실관계**는 사례집에만 있고, 목차·학설·판시
+원문은 기본서에만 있다. 어느 절이 어느 문제로 나왔는지 이어 두지 않으면 뒤
+단계가 사안을 지어낸다.
+
+```bash
+./mapping build output/기본서 output/사례집 -o mapping.yaml
+```
+
+근거 셋을 세어 점수를 매긴다.
+
+| 근거 | 어떻게 |
+|---|---|
+| 제목 키워드 | 사례집 제목 대괄호 안(`[일부청구-시효중단]`)을 `-` `,` 로 갈라 기본서 절 제목과 대조. **부분 일치도 인정** (`명시적 일부청구` ⊃ `일부청구`). OCR 이 흘린 괄호(`」`, `｝`)도 대괄호로 본다 |
+| 사건번호 | 절 안에서 다시 뽑은 사건번호의 교집합. 프론트매터의 `cases` 는 **파일 전체** 것이라 절 단위 대조에 못 쓴다 |
+| 두문자 | 교집합. 한 글자 차이(`확객시전` ↔ `확객시젠`)는 `near_mnemonics` 에 따로 적는다 — 두문자 결정표에서 확정할 것 |
+
+`score` 3·2 는 `mappings`, 1 은 `candidates`, 0 은 `unmapped` 로 간다.
+`role` 은 사례집 답안 목차의 배점으로 가른다 — 최대 배점이면 `primary`,
+총점의 25% 이상이면 `composite`, 그 아래면 `incidental`. **배점을 못 찾으면
+`composite`** 으로 둔다. 어림짐작으로 `primary` 를 주면 사람이 그냥 넘긴다.
+
+한 문제가 여러 절에 걸리고(`E-6` → `IV. 시효중단`·`V. 기판력`) 한 절에 여러
+문제가 붙는다. 1:N 과 N:1 을 둘 다 만든다.
+
+**score 3 이어도 자동 승인하지 않는다.** 잘못된 사안이 붙으면 노트 전체가
+틀리므로 사람 승인을 반드시 거친다.
+
+```bash
+./mapping review mapping.yaml            # 승인 대기 목록
+./mapping confirm mapping.yaml --all
+./mapping confirm mapping.yaml --section "IV. 시효중단"
+./mapping validate mapping.yaml          # M1~M4
+```
+
+`confirm` 은 yaml 을 다시 써 내지 않고 `confirmed:` 줄만 고친다. 다시 써 내면
+왜 그렇게 판정했는지 적어 둔 주석이 날아가기 때문이다.
+
+검증 M4 가 중요하다. 배점은 작은 글씨라 오인식이 잦은데, 답안 목차 배점의
+합계와 문제 총점을 견주면 잡힌다. `1 + 2.5 + 4 + 0.5 = 8` 인데 총점이 10점이면
+어딘가 잘못 읽은 것이다.
 
 중간 파일은 `output/_work/<파일이름>/` 에 남는다
 (`01_raw.jsonl` → `02_normalized.jsonl` → `03_blocks.jsonl` / `03_structured.md`,
