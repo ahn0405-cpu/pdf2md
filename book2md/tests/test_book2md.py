@@ -343,6 +343,25 @@ class 분할(unittest.TestCase):
         self.assertIn("046일부청구", names[0])
         self.assertNotIn("머리", " ".join(names))
 
+    def test_학판검_세트를_가르지_않는다(self):
+        """'N. 학설' 에서 자르면 학설·判例·검토가 다른 파일로 흩어진다.
+        논점 번호가 붙은 제목이 있으면 그것만 경계로 삼는다."""
+        prof = get_profile(CFG, "textbook")
+        st = Structurer(CFG, prof, PAT)
+        rows = ["046 일부청구", "IV. 시효중단", "1. 문제점", "본문이다.",
+                "2. 학설", "가설이다.", "3. 判例", "판시 (74다1557).",
+                "4. 검토", "검토다.", "047 소장", "I. 의의", "다른 본문."]
+        st.feed(Page(number=1, kind="layout",
+                     lines=[Line(text=t, size=9.0, y0=100 + 16 * k, y1=110 + 16 * k)
+                            for k, t in enumerate(rows)]), [])
+        parts = split(st.finish(), prof)
+        names = [filename(p, prof) for p in parts]
+        self.assertEqual(len(parts), 2)
+        self.assertNotIn("학설", " ".join(names))
+        body = parts[0].text()
+        for word in ("학설", "判例", "검토"):
+            self.assertIn(word, body)          # 한 파일 안에 함께 있다
+
     def test_장_단위로_나누고_프론트매터를_붙인다(self):
         prof = get_profile(CFG, "textbook")
         st = Structurer(CFG, prof, PAT)

@@ -43,7 +43,7 @@ def split(blocks: list[Block], prof: dict) -> list[Part]:
         # 이 교재는 장 제목이 쪽마다 되풀이되는 꼬리말로만 찍혀 있어서
         # 본문에는 없다. 그럴 때는 논점(절) 단위로 나눈다. 안 그러면 한 덩어리를
         # 크기로만 쪼개어 '머리1', '머리2' 같은 이름이 붙는다.
-        parts = _split_level(blocks, 3)
+        parts = _split_level(blocks, 3, prof.get("split_prefer"))
     if limit:
         parts = _resplit(parts, limit)
     for k, part in enumerate(parts, 1):
@@ -80,11 +80,22 @@ def _split_chapter(blocks) -> list[Part]:
     return parts or [Part(index=1, title="전체", blocks=list(blocks))]
 
 
-def _split_level(blocks, level: int) -> list[Part]:
-    """주어진 수준의 헤딩마다 자른다. 파일 이름은 그 제목에서 딴다."""
+def _split_level(blocks, level: int, prefer: str | None = None) -> list[Part]:
+    """주어진 수준의 헤딩마다 자른다. 파일 이름은 그 제목에서 딴다.
+
+    prefer 무늬에 맞는 제목이 하나라도 있으면 **그것만** 경계로 삼는다.
+    이 교재의 논점 번호('046 일부청구')가 그것이다. 같은 수준의 'N. 학설'
+    에서도 자르면 학설·判例·검토가 서로 다른 파일로 흩어진다.
+    """
+    rx = re.compile(prefer) if prefer else None
+    if rx and not any(b.kind == "heading" and b.level <= level
+                      and rx.search(_plain(b.text)) for b in blocks):
+        rx = None
+
     parts, current, lead = [], None, []
     for b in blocks:
-        if b.kind == "heading" and b.level <= level:
+        if b.kind == "heading" and b.level <= level and (
+                rx is None or rx.search(_plain(b.text))):
             if current:
                 parts.append(current)
             title = _plain(b.text)

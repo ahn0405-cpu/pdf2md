@@ -246,6 +246,10 @@ profiles:
   textbook:
     label: 기본서
     split: chapter          # 장(章) 단위
+    # 장 제목이 본문에 없을 때(이 교재가 그렇다) 절 단위로 나누는데,
+    # 'N. 학설' 같은 소절에서 자르면 학판검 세트가 갈라진다.
+    # 논점 번호가 붙은 제목이 있으면 그것만 경계로 삼는다.
+    split_prefer: '^\d{3}\s'
     split_max_bytes: 409600 # 400KB 넘으면 절 단위로 재분할 (§6.3)
     columns: 1              # 실물 확인 결과 1단 (§3.1)
     emphasis: true          # 색상 → 마크다운 강조 (§2.4)
