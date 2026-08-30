@@ -64,8 +64,10 @@ class Pipeline:
         if getattr(parser, "palette", None):
             pal = parser.palette
             base["colored_spans"] = pal.colored_spans
+            base["colored_chars"] = sum(pal.chars.values())
             base["total_spans"] = pal.total_spans
             base["distinct_colors"] = len(pal.counts)
+            base["color_source"] = getattr(parser, "color_source", "span")
             (self.reports / "palette.md").write_text(palette_report(pal), encoding="utf-8")
         self.baseline.write_text(json.dumps(base, ensure_ascii=False, indent=2),
                                  encoding="utf-8")
@@ -77,7 +79,8 @@ class Pipeline:
         파서와 무관한 별도 추출(PyMuPDF 원문)로 센다. 파서가 뭔가를 흘리면
         여기서 드러나야 하기 때문이다.
         """
-        base = {"pages": page_count, "source": Path(self.pdf).name}
+        base = {"pages": page_count, "source": Path(self.pdf).name,
+                "partial": self.pages is not None}
         try:
             import pymupdf
             with pymupdf.open(self.pdf) as doc:
@@ -120,6 +123,7 @@ class Pipeline:
             st.feed(page, found)
             pages += 1
         blocks = st.finish()
+        self._update_baseline(absorbed=st.absorbed_chars, line_chars=st.seen_chars)
         with open(self.blocks_file, "w", encoding="utf-8") as fh:
             for b in blocks:
                 fh.write(json.dumps(asdict(b), ensure_ascii=False) + "\n")
@@ -127,6 +131,15 @@ class Pipeline:
         heads = sum(1 for b in blocks if b.kind == "heading")
         fns = sum(1 for b in blocks if b.kind == "footnotes")
         self.log(f"[구조화] {pages}쪽 → 블록 {len(blocks)} (헤딩 {heads}, 각주블록 {fns})")
+
+    def _update_baseline(self, **fields) -> None:
+        """뒤 단계에서 알게 된 값을 baseline 에 적어 둔다."""
+        if not self.baseline.exists():
+            return
+        data = json.loads(self.baseline.read_text(encoding="utf-8"))
+        data.update(fields)
+        self.baseline.write_text(json.dumps(data, ensure_ascii=False, indent=2),
+                                 encoding="utf-8")
 
     # ── 4. 분할 ─────────────────────────────────────────────────
     def split(self) -> list[str]:

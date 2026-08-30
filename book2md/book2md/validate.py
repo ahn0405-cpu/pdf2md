@@ -91,11 +91,15 @@ def validate(root, cfg: dict, baseline: dict | None = None) -> Result:
     _mnemonics(res, pat, body_by_file)
     _color(res, whole, baseline, cfg)
     _sidenotes(res, cfg, body_by_file)
-    _footnotes(res, pat, body_by_file)
+    _footnotes(res, pat, body_by_file, bool((baseline or {}).get("partial")))
     _structure(res, body_by_file)
     _noise(res, cfg, whole, baseline)
     _extraction_qa(res, cfg, body_by_file)
     _frontmatter(res, pat, text_by_file)
+    if (baseline or {}).get("partial"):
+        res.counts["partial"] = True
+        res.add("INFO", "범위", "쪽 범위를 잘라 돌렸다. 범위 밖과 짝이 맞지 않는 "
+                                "각주·참조는 WARN 으로 낮췄다.")
     return res
 
 
@@ -153,23 +157,41 @@ def _mnemonics(res, pat, bodies):
 
 # ── 5.4 색상 강조 보존 ───────────────────────────────────────────
 def _color(res, whole, baseline, cfg):
-    found = len(_EMPH.findall(whole))
-    res.counts["emphasis"] = found
-    if not baseline or "colored_spans" not in baseline:
-        res.add("INFO", "5.4 색상", f"강조 마크업 {found}건. 원본 span 대조본이 없다.")
+    """강조 보존을 **글자 수**로 견준다.
+
+    span 수와 마크업 덩어리 수는 단위가 다르다. 이어진 span 여럿이 마크업 하나로
+    합쳐지므로(그게 맞는 동작이다) 개수끼리 견주면 늘 크게 어긋난 것처럼 보인다.
+    글자 수는 합쳐져도 변하지 않는다.
+    """
+    runs = _EMPH.findall(whole)
+    found_chars = sum(len(r.strip()) for r in runs)
+    res.counts["emphasis"] = len(runs)
+    res.counts["emphasis_chars"] = found_chars
+    if not baseline or "colored_chars" not in baseline:
+        res.add("INFO", "5.4 색상",
+                f"강조 마크업 {len(runs)}덩어리 / {found_chars}자. 원본 대조본이 없다.")
         return
-    want = baseline["colored_spans"]
-    res.counts["colored_spans_baseline"] = want
+    # 강조는 두 번 옮겨진다. 원본 span → 줄 글자(==) → 결과물.
+    # 헤딩 제목으로 들어간 것은 마크업이 걷히지만 사라진 게 아니라 구조가 담은
+    # 것이므로 되더한다. 그리고 **잃은 것만** 본다 — 이어진 span 이 한 덩어리로
+    # 합쳐지면서 사이의 구분자까지 안에 들어가 글자 수가 조금 느는 것은
+    # 보존에 문제가 없다.
+    origin = baseline["colored_chars"]
+    absorbed = int(baseline.get("absorbed", 0))
+    kept = found_chars + absorbed
+    res.counts["colored_chars_origin"] = origin
+    res.counts["colored_chars_kept"] = kept
+    res.counts["colored_chars_in_headings"] = absorbed
     colors = baseline.get("distinct_colors", 0)
-    if want == 0:
-        res.add("WARN", "5.4 색상", "원본에 유채색 span 이 없다. 강조색 없는 판본인지 "
+    if origin == 0:
+        res.add("WARN", "5.4 색상", "원본에 유채색이 없다. 강조색 없는 판본인지 "
                                     "확인할 것.")
         return
-    err = abs(found - want) / want
-    if err > 0.05:
+    lost = (origin - kept) / origin
+    if lost > 0.05:
         res.add("WARN", "5.4 색상",
-                f"강조 개수 오차 {err * 100:.1f}% (원본 span {want} vs 마크업 {found}). "
-                f"인접 span 병합 때문일 수 있으니 palette.md 와 함께 볼 것.")
+                f"강조가 {lost * 100:.1f}% 사라졌다 (원본 {origin}자 vs 남은 {kept}자"
+                f" = 마크업 {found_chars} + 제목흡수 {absorbed}). palette.md 와 함께 볼 것.")
     if colors > 3:
         res.add("WARN", "5.4 색상", f"색상 팔레트가 {colors}종이다. 근접색 병합이 필요하다 "
                                     f"(preserve.color.merge_distance).")
@@ -193,7 +215,7 @@ def _sidenotes(res, cfg, bodies):
 
 
 # ── 5.6 각주 무결성 ──────────────────────────────────────────────
-def _footnotes(res, pat, bodies):
+def _footnotes(res, pat, bodies, partial=False):
     refs, defs = Counter(), Counter()
     where = defaultdict(list)
     for path, text in bodies.items():
@@ -211,13 +233,16 @@ def _footnotes(res, pat, bodies):
     orphan_def = sorted(set(defs) - set(refs))
     orphan_ref = sorted(set(refs) - set(defs))
     res.counts["footnote_mismatch"] = len(orphan_def) + len(orphan_ref)
+    # 쪽 범위를 잘라 돌린 경우, 짝이 범위 밖에 있는 것은 당연하다. 그걸 FAIL 로
+    # 세면 §8 의 '한 장만 먼저' 가 영영 통과하지 못한다.
+    level = "WARN" if partial else "FAIL"
     if orphan_ref:
-        res.add("FAIL", "5.6 각주",
+        res.add(level, "5.6 각주",
                 f"정의 없는 참조 {len(orphan_ref)}건 — 각주 본문이 사라졌다: "
                 f"{', '.join(str(n) for n in orphan_ref[:20])}")
     if orphan_def:
         # 각주는 버리지 않았다. 다만 참조를 못 살렸으므로 §5.8 은 불일치로 본다.
-        res.add("FAIL", "5.6 각주",
+        res.add(level, "5.6 각주",
                 f"참조 없는 각주 {len(orphan_def)}건 — 본문의 위첨자 번호를 못 살렸다"
                 f"(각주 자체는 버리지 않고 섹션 끝에 남겨 뒀다): "
                 f"{', '.join(str(n) for n in orphan_def[:20])}")
@@ -350,7 +375,7 @@ def reports(res: Result, cfg: dict) -> dict[str, str]:
          _diff(c.get("stars"), c.get("stars_baseline")),
          c.get("stars_baseline") is None or c.get("stars") == c.get("stars_baseline")),
         ("각주 참조/정의 불일치", "0건", c.get("footnote_mismatch", 0),
-         c.get("footnote_mismatch", 0) == 0),
+         c.get("footnote_mismatch", 0) == 0 or c.get("partial")),
         ("여백 마커 병합 의심", "0건", c.get("sidenote_merged", 0),
          c.get("sidenote_merged", 0) == 0),
     ]
@@ -359,8 +384,8 @@ def reports(res: Result, cfg: dict) -> dict[str, str]:
     warn_noise = c.get("noise_per_page", 0) <= float(cfg["validation"]["warn_on"]["noise_per_page"])
     L.append(f"| 잔여 노이즈 | 쪽당 {cfg['validation']['warn_on']['noise_per_page']}건 이하 | "
              f"{c.get('noise_per_page', 0)} | {'✅' if warn_noise else '⚠️ WARN'} |")
-    L.append(f"| 색상 강조 개수 오차 | 5% 이하 | {c.get('emphasis', 0)} 마크업 / "
-             f"{c.get('colored_spans_baseline', '-')} span | "
+    L.append(f"| 색상 강조 유실 | 5% 이하 | 원본 {c.get('colored_chars_origin', '-')}자 "
+             f"→ 남음 {c.get('colored_chars_kept', '-')}자 | "
              f"{'✅' if not any(f.check.startswith('5.4') and f.level == 'WARN' for f in res.findings) else '⚠️ WARN'} |")
     L.append("")
     L.append("> 두문자 일치(§5.3)는 두 소스가 모두 있어야 판정한다. "

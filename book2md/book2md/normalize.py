@@ -18,6 +18,9 @@ from dataclasses import dataclass
 from .model import Page
 from .patterns import Patterns
 
+#: '1 .문제점' 처럼 번호와 마침표 사이가 벌어진 것. 줄 앞에서만 고친다.
+_ITEM_SPACE = re.compile(r"^(\s*(?:[=*]{2})?\s*[0-9IVXivx]{1,4})\s+([.)])")
+
 _FULLWIDTH = {c: chr(ord(c) - 0xFEE0) for c in
               [chr(x) for x in range(0xFF01, 0xFF5F)]}
 _FULLWIDTH["　"] = " "
@@ -49,6 +52,7 @@ class Normalizer:
         self.noise_tokens = set(n.get("noise_tokens", []))
         self.collapse = bool(n.get("collapse_spaces", True))
         self.fix_dates = bool(n.get("fix_dates", True))
+        self.item_space = bool(n.get("item_number_space", True))
         self.date_hangul = n.get("date_trailing_hangul", "warn")
         self.stars = "".join(cfg["preserve"]["star"]["chars"])
         self.allowed = _allowed_set(cfg.get("noise_scan", {}))
@@ -74,6 +78,8 @@ class Normalizer:
         text = self._noise(text, page_no, changes)
         text = self._cases(text, page_no, changes)
         text = self._articles(text)
+        if self.item_space:
+            text = _ITEM_SPACE.sub(r"\1\2", text)
         if self.fix_dates:
             text = self._dates(text, page_no, changes)
         if self.collapse:
@@ -187,10 +193,13 @@ class Normalizer:
                 if self.date_hangul == "strip":
                     cursor += k
             if junk or hangul_tail:
+                # 기록에는 날짜와 바로 뒤 몇 글자만 남긴다. 뒤 문장을 통째로
+                # 물고 오면 사람이 무엇이 바뀐 건지 못 알아본다.
+                tail_shown = hangul_tail[:4]
                 changes.append(Change(
-                    page_no, "date", m.group(0) + junk + hangul_tail,
+                    page_no, "date", m.group(0) + junk + tail_shown,
                     canon if (self.date_hangul == "strip" or not hangul_tail)
-                    else canon + hangul_tail,
+                    else canon + tail_shown,
                     _ctx(text, m.start(), m.end())))
             elif canon != m.group(0):
                 changes.append(Change(page_no, "date", m.group(0), canon,

@@ -51,6 +51,10 @@ class Structurer:
         self._sidenotes: list[dict] = []
         self._in_prompt = False
         self._page = 0
+        #: 들어온 줄에서 본 강조 글자 수. finish() 에서 결과물과 견줘
+        #: '헤딩 제목으로 들어가면서 마크업이 걷힌 양'을 낸다 (§5.4 대조용).
+        self.seen_chars = 0
+        self.absorbed_chars = 0
 
         legend = cfg["legend"]
         self._exam_rx = re.compile(legend["exam_year"]["pattern"])
@@ -90,45 +94,52 @@ class Structurer:
             if not text:
                 self._flush_para()
                 continue
-            if self._bonus is not None and self._bonus_continues(text):
+            # 구조는 강조 표시를 걷어낸 글자로 판단한다. 색을 먼저 입히기 때문에
+            # `==IV. 시효중단==` 을 그대로 맞추면 제목이 하나도 안 걸린다.
+            plain = _strip_markup(text)
+            self.seen_chars += _emphasised_chars(text)
+            if self._bonus is not None and self._bonus_continues(plain):
                 self._bonus.append(text)
                 continue
             if self._bonus is not None:
                 self._close_bonus(page.number)
-            marker = self._bonus_head(text)
+            marker = self._bonus_head(plain)
             if marker:
                 self._flush_para()
                 self._bonus, self._bonus_title = [], marker
                 continue
             if self.prof["name"] == "casebook":
-                self._feed_casebook(text, line, page.number)
+                self._feed_casebook(text, plain, line, page.number)
             else:
-                self._feed_textbook(text, line, page.number)
+                self._feed_textbook(text, plain, line, page.number)
 
     def finish(self) -> list[Block]:
         if self._bonus is not None:
             self._close_bonus(self._para_page)
         self._flush_para()
         self._flush_footnotes(final=True)
+        # 헤딩·박스 제목으로 들어가며 걷힌 강조는 사라진 게 아니라 구조가 담은 것이다.
+        kept = sum(_emphasised_chars(b.text) for b in self.blocks)
+        self.absorbed_chars = max(0, self.seen_chars - kept)
         return self.blocks
 
     # ── 기본서 (§6.1) ────────────────────────────────────────────
-    def _feed_textbook(self, text: str, line, page_no: int) -> None:
+    def _feed_textbook(self, text: str, plain: str, line, page_no: int) -> None:
         for level, rx in self._heads:
-            if rx.match(text):
-                self._heading(level, text, page_no, y=getattr(line, "y0", None))
+            if rx.match(plain):
+                self._heading(level, plain, page_no, y=getattr(line, "y0", None))
                 self._in_roman = (level == 4)
                 self._last_item = 0
                 return
-        items = self._outline_items(text)
+        items = self._outline_items(plain)
         if items:
             self._flush_para()
             self.blocks.append(self._mk("para", text, page=page_no,
                                         meta={"outline": items}))
             return
-        m = self._sec_rx.match(text) if self._sec_rx else None
+        m = self._sec_rx.match(plain) if self._sec_rx else None
         if m:
-            short = len(text) <= self._sec_max and not _SENT_END.search(text)
+            short = len(plain) <= self._sec_max and not _SENT_END.search(plain)
             if self._in_roman:
                 if not short:
                     # 'N. 검토 …' 처럼 한 줄에 본문까지 이어진 경우다.
@@ -137,18 +148,18 @@ class Structurer:
                     return
                 self._flush_para()
                 self._last_item = int(m.group(1))
-                self.blocks.append(self._mk("bold", f"**{_inline(self.pat, text)}**",
+                self.blocks.append(self._mk("bold", f"**{_inline(self.pat, plain)}**",
                                             page=page_no))
                 return
             if short:
-                self._heading(3, text, page_no, y=getattr(line, "y0", None))
+                self._heading(3, plain, page_no, y=getattr(line, "y0", None))
                 return
         self._paragraph(text, page_no)
 
     # ── 사례집 (§6.2, §4.7) ──────────────────────────────────────
-    def _feed_casebook(self, text: str, line, page_no: int) -> None:
+    def _feed_casebook(self, text: str, plain: str, line, page_no: int) -> None:
         if self._problem_rx:
-            m = self._problem_rx.match(text)
+            m = self._problem_rx.match(plain)
             if m and m.group(3).strip():
                 self._in_prompt = False
                 title = m.group(3).strip()
@@ -157,7 +168,7 @@ class Structurer:
                               page_no, score=score)
                 self._last_problem = self.blocks[-1]
                 return
-        bare = text.strip("【】[]()（） ")
+        bare = plain.strip("【】[]()（） ")
         if bare.startswith(self._prompt) or bare.startswith(self._answer):
             is_prompt = bare.startswith(self._prompt)
             label = "문제" if is_prompt else "답안"
@@ -175,9 +186,9 @@ class Structurer:
             self.blocks.append(self._mk("bold", f"**{label}**{suffix}", page=page_no))
             return
         for level, rx in self._ans_heads:
-            if rx.match(text) and len(text) <= 60:
+            if rx.match(plain) and len(plain) <= 60:
                 self._in_prompt = False
-                score, title = _split_score(self._score_rx, text, self._score_max)
+                score, title = _split_score(self._score_rx, plain, self._score_max)
                 self._heading(level, title, page_no, score=score)
                 return
         self._paragraph(text, page_no)
@@ -352,6 +363,13 @@ def _label_of(label_rx: re.Pattern, chunk: str) -> str:
         return ""
     head = re.split(r"[\[(（.]", chunk[m.end():], 1)[0].strip()
     return head if 0 < len(head) <= 12 else ""
+
+
+_EMPH_RUN = re.compile(r"==([^=\n]{1,300})==")
+
+
+def _emphasised_chars(text: str) -> int:
+    return sum(len(m.group(1).strip()) for m in _EMPH_RUN.finditer(text))
 
 
 def _strip_markup(text: str) -> str:

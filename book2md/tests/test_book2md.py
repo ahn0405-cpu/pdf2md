@@ -404,15 +404,32 @@ class 스캔본(unittest.TestCase):
                            log=lambda *a: None).run("extract")
         md = next((out / "기본서").glob("*.md")).read_text(encoding="utf-8")
         self.assertEqual(verdict, "PASS")
-        self.assertIn("(92재다226*)", md)          # ＜ → ( 복원 + 별표 보존
+        # §2.1 ＜ → ( 복원, 별표 보존
         self.assertIn("(74다1557)", md)
-        self.assertIn("`[일나시 나소시]`", md)      # 빠진 닫는 괄호 복구
-        self.assertIn("==", md)                    # 그림에서 읽은 강조색
-        self.assertIn("[^100]:", md)               # 'NNN)' 각주 정의
-        self.assertIn("[^100]", md.split("[^100]:")[0])   # 본문 참조
-        self.assertIn("`sE-8`", md)                # 옆번호
-        self.assertIn("exam_years: [2011]", md)
+        self.assertIn("(91다43695*)", md)
         self.assertIn("standard: true", md)
+        # §2.2 빠진 닫는 괄호 복구 + 자리로 두문자 판정
+        self.assertIn("`[일나시 나소시]`", md)
+        # §2.4 그림 픽셀에서 읽은 강조색
+        self.assertIn("==확장의 뜻을 밝힌 때에는 전부에 미친다==", md)
+        # §2.5 'NNN)' 꼴 각주: 정의와 본문 참조가 모두 살아 있다
+        self.assertIn("[^264]:", md)
+        self.assertIn("[^265]", md.split("[^264]:")[0])
+        # 낱말 사이 공백 복원 — 없으면 뒤 처리가 못 읽는다
+        self.assertIn("수량적 가분 채권을 분할 청구하는 것을 말한다.", md)
+        # 제목이 색을 입고 있어도 헤딩으로 잡힌다
+        self.assertIn("### 046 일부청구", md)
+        self.assertIn("#### IV. 시효중단 `(11)` `sE-8`", md)
+        # 번호와 제목이 다른 조각으로 떨어진 것을 한 줄로
+        self.assertIn("**3. 判例", md)
+        self.assertIn("**4. 검토**", md)
+        # ⑧ ☑ 가 '0' 으로 읽혀도 박스로
+        self.assertIn("> ### ☑ 실제로 청구취지 확장하지 않은 부분의 취급", md)
+        self.assertIn("bonus_topics:", md)
+        # ① 논점 윤곽 띠
+        self.assertIn('outline: ["의의", "소송물", "시효중단", "기판력"]', md)
+        # 꼬리말은 본문에도 각주에도 들어가지 않는다
+        self.assertNotIn("윤곽민사소송법", md)
 
     def test_두문자_복구가_기록에_남는다(self):
         """괄호만 되돌리고 안쪽 글자는 손대지 않았음을 사람이 볼 수 있어야 한다."""

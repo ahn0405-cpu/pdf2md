@@ -269,6 +269,7 @@ def lines(pdf_path: str, cfg: dict, prof: dict, pages) -> str:
     from .model import Page
     from .normalize import Normalizer
     from .parsers import get_parser
+    from .parsers.pymupdf_native import strip_markup
 
     pat = Patterns.build(cfg)
     prof = dict(prof)
@@ -300,22 +301,25 @@ def lines(pdf_path: str, cfg: dict, prof: dict, pages) -> str:
             text = line.stripped
             if not text:
                 continue
-            zone = "각주" if id(line) not in kept else \
-                {"header": "머리말", "sidenote": "여백"}.get(zones.get(id(line), "body"), "본문")
+            zone = {"header": "머리말·꼬리말", "footnote": "각주",
+                    "sidenote": "여백"}.get(line.zone, "본문")
+            if zone == "본문" and id(line) not in kept:
+                zone = "각주"
+            plain = strip_markup(text)
             role = "본문"
             if zone == "본문":
                 for level, rx in heads:
-                    if rx.match(text):
+                    if rx.match(plain):
                         role = f"**헤딩 H{level}**"
                         in_roman = (level == 4)
                         break
                 else:
-                    if problem_rx and problem_rx.match(text):
+                    if problem_rx and problem_rx.match(plain):
                         role = "**문제 헤딩**"
-                    elif any(rx.match(text) for _, rx in ans_heads) and len(text) <= 60:
+                    elif any(rx.match(plain) for _, rx in ans_heads) and len(plain) <= 60:
                         role = "**답안 헤딩**"
-                    elif sec_rx and sec_rx.match(text):
-                        short = len(text) <= sec_max
+                    elif sec_rx and sec_rx.match(plain):
+                        short = len(plain) <= sec_max
                         role = ("굵은 소항목" if in_roman and short else
                                 "절 헤딩 H3" if short else "본문(N. 이지만 길다)")
             shown = text[:60].replace("|", "\\|")

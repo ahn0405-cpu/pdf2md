@@ -83,7 +83,13 @@ class PyMuPDFParser(Parser):
         side_inline = re.compile(r"s[A-Z]-\d{1,3}")
         margin_ratio = float(side_cfg.get("margin_ratio", 0.78))
 
+        ex = cfg.get("extract", {})
         opts = dict(
+            space_gap=float(ex.get("space_gap_ratio", 0.18)),
+            merge_overlap=float(ex.get("line_merge_overlap", 0.55)),
+            footer_zone=float(cfg.get("running", {}).get("footer_zone", 0.94)),
+            footer_rx=[re.compile(x) for x in
+                       cfg.get("running", {}).get("footer_patterns", [])],
             size_ratio=float(fn.get("size_ratio", 0.92)),
             bottom_zone=float(fn.get("bottom_zone", 0.42)),
             sup_ratio=float(fn.get("superscript_size_ratio", 0.82)),
@@ -108,6 +114,7 @@ class PyMuPDFParser(Parser):
                     page, body_size, opts, color_cfg, want_emphasis,
                     want_sidenote, side_rx, side_inline,
                     rect.width * margin_ratio, i + 1, sampler)
+                lines = _merge_same_line(lines, opts["merge_overlap"])
                 self._mark_zones(lines, rect.height, body_size, opts)
                 ordered = self._order(lines, rect.width, profile.get("columns", "auto"))
                 yield Page(number=i + 1, lines=ordered, width=rect.width,
@@ -144,18 +151,19 @@ class PyMuPDFParser(Parser):
                     sampler=None):
         out: list[Line] = []
         sidenotes: list[dict] = []
-        for block in page.get_text("dict")["blocks"]:
+        for block in page.get_text("rawdict")["blocks"]:
             if block.get("type") != 0:
                 continue
             for line in block.get("lines", []):
-                spans = [s for s in line.get("spans", []) if s["text"].strip()]
+                spans = [s for s in line.get("spans", []) if _span_text(s).strip()]
                 if not spans:
                     continue
+                _restore_spaces(spans, opts["space_gap"])
                 # ⑩ 옆번호: 우측 여백에 있고 sE-8 꼴인 span 을 먼저 떼어낸다 (§4.3)
                 if want_sidenote:
                     kept = []
                     for span in spans:
-                        text = span["text"].strip()
+                        text = span["text"].strip()   # _restore_spaces 가 채워 둔다
                         if span["bbox"][0] >= margin_x and (
                                 side_rx.match(text) or side_inline.fullmatch(text)):
                             sidenotes.append({"text": text,
@@ -227,18 +235,23 @@ class PyMuPDFParser(Parser):
         for line in lines:
             if line.y1 <= height * opts["header_zone"]:
                 line.zone = "header"
+            elif line.y0 >= height * opts["footer_zone"] and \
+                    any(rx.search(strip_markup(line.stripped)) for rx in opts["footer_rx"]):
+                line.zone = "header"        # 꼬리말도 본문이 아니다 (§4.1)
 
         limit = height * (1.0 - opts["bottom_zone"])
         small = body_size * opts["size_ratio"]
         start = None
         for k in range(len(lines) - 1, -1, -1):
             line = lines[k]
-            if line.zone == "header" or line.y0 < limit or line.size >= small:
+            if line.zone == "header":
+                continue            # 꼬리말은 건너뛴다. 여기서 멈추면 각주를 통째로 놓친다
+            if line.y0 < limit or line.size >= small:
                 break
             start = k
         if start is None:
             return
-        if not re.match(r"^\d{1,4}\b", lines[start].stripped):
+        if not re.match(r"^\d{1,4}\b", strip_markup(lines[start].stripped)):
             return          # 번호로 시작하지 않으면 각주가 아니다
         for line in lines[start:]:
             if line.zone != "header":
@@ -267,8 +280,132 @@ class PyMuPDFParser(Parser):
         return crossing <= n * 0.08 and left >= n * 0.25 and right >= n * 0.25
 
 
+_MARKUP = re.compile(r"`|={2}|\*{2}")
+
+
+def strip_markup(text: str) -> str:
+    """우리가 넣은 강조 표시를 걷어낸 글자.
+
+    색을 먼저 입히고 구조를 나중에 판단하기 때문에, 제목·꼬리말을 알아볼 때는
+    표시를 걷어낸 글자로 봐야 한다. `==IV. 시효중단==` 이 제목으로 안 걸리면
+    문서 전체가 평평해진다.
+    """
+    return _MARKUP.sub("", text)
+
+
 def l_center(line) -> float:
     return (line.x0 + line.x1) / 2
+
+
+def _span_text(span) -> str:
+    """rawdict 의 span 은 글자 목록으로 온다."""
+    if "text" in span:
+        return span["text"]
+    return "".join(c["c"] for c in span.get("chars", []))
+
+
+def _restore_spaces(spans, gap_ratio: float) -> None:
+    """글자 사이가 벌어진 곳에 공백을 넣고 span['text'] 를 채운다.
+
+    스캔본 OCR 레이어는 낱말 사이 공백을 글자로 넣어 주지 않는다. 그대로 두면
+    '수량적가분채권을분할청구하는것을말한다' 가 되어 뒤 처리가 못 읽는다.
+    글자 상자의 가로 간격이 글자 크기에 견줘 벌어졌으면 낱말 경계로 본다.
+    """
+    if gap_ratio <= 0:
+        for span in spans:
+            span["text"] = _span_text(span)
+        return
+    prev_x1 = None
+    prev_size = 0.0
+    for span in spans:
+        chars = span.get("chars")
+        if not chars:
+            span["text"] = _span_text(span)
+            prev_x1, prev_size = span.get("bbox", (0, 0, 0, 0))[2], span.get("size", 0)
+            continue
+        out = []
+        for ch in chars:
+            x0, _, x1, _ = ch["bbox"]
+            size = span.get("size", prev_size) or prev_size
+            if (prev_x1 is not None and ch["c"] != " " and out[-1:] != [" "]
+                    and x0 - prev_x1 > size * gap_ratio):
+                out.append(" ")
+            out.append(ch["c"])
+            prev_x1, prev_size = x1, size
+        span["text"] = "".join(out)
+
+
+def _merge_same_line(lines, overlap: float):
+    """세로로 겹치는 줄을 한 줄로 잇는다.
+
+    OCR 은 한 줄 안에서도 글자 크기가 다르면 따로 떨궈 놓는다.
+        y=331 x=75  '.判例[일외별명일]'
+        y=332 x=60  '3'
+    이대로면 '3.判例' 라는 제목이 영영 안 만들어진다. 세로 범위가 충분히
+    겹치는 것들을 모아 x 순서로 잇는다.
+    """
+    if overlap <= 0 or len(lines) < 2:
+        return lines
+    rows = sorted(lines, key=lambda l: (round(l.y0, 1), l.x0))
+    groups: list[list] = []
+    for line in rows:
+        placed = False
+        for group in reversed(groups[-3:]):
+            ref = group[0]
+            lo = max(ref.y0, line.y0)
+            hi = min(ref.y1, line.y1)
+            span = min(ref.y1 - ref.y0, line.y1 - line.y0)
+            if span > 0 and (hi - lo) / span >= overlap and ref.zone == line.zone:
+                group.append(line)
+                placed = True
+                break
+        if not placed:
+            groups.append([line])
+
+    merged = []
+    for group in groups:
+        if len(group) == 1:
+            merged.append(group[0])
+            continue
+        group.sort(key=lambda l: l.x0)
+        head = group[0]
+        text = head.text
+        for nxt in group[1:]:
+            text = _join_pieces(text, nxt.text,
+                                nxt.x0 - _prev_x1(group, nxt) > 1.0)
+        head.text = text
+        head.x1 = max(l.x1 for l in group)
+        head.y0 = min(l.y0 for l in group)
+        head.y1 = max(l.y1 for l in group)
+        head.size = max(l.size for l in group)
+        head.bold = all(l.bold for l in group)
+        head.sup_numbers = [n for l in group for n in l.sup_numbers]
+        merged.append(head)
+    return sorted(merged, key=lambda l: (l.zone == "footnote", round(l.y0, 1), l.x0))
+
+
+def _join_pieces(head: str, tail: str, gap: bool) -> str:
+    """번호 조각과 제목 조각을 잇는다.
+
+    '3' 과 '.判例' 는 인쇄상 붙어 있는데 OCR 이 둘로 떨궈 놓는다. 사이가
+    벌어졌다고 공백을 넣으면 '3 . 判例' 가 되어 번호 무늬가 깨진다.
+    """
+    if not head:
+        return tail.strip()
+    a, b = strip_markup(head).rstrip(), strip_markup(tail).lstrip()
+    glue = gap
+    if b[:1] in ".)]" and (a[-1:].isdigit() or a[-1:] in "IVXivx"):
+        glue = False
+    return (head + (" " if glue else "") + tail).strip()
+
+
+def _prev_x1(group, target) -> float:
+    prev = None
+    for line in group:
+        if line is target:
+            break
+        prev = line
+    return prev.x1 if prev else target.x0
 
 
 def _render(pieces) -> str:

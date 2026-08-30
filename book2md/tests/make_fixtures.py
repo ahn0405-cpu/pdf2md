@@ -103,6 +103,29 @@ def _width(text, size):
     return font.text_length(text, size)
 
 
+def _place_ocr(page, x, y, shown, ocr, size):
+    """OCR 레이어를 종이의 낱말 자리에 공백 글자 없이 놓는다.
+
+    실물이 이 구조다. 공백 글자는 없고 낱말 사이가 벌어져만 있어서,
+    글자 간격을 보지 않으면 '수량적가분채권을' 처럼 붙어 나온다.
+    """
+    words = shown.split(" ")
+    flat = ocr.replace(" ", "")
+    cursor = x
+    taken = 0
+    for w in words:
+        n = len(w.replace(" ", ""))
+        chunk = flat[taken:taken + n] if taken < len(flat) else ""
+        taken += n
+        if chunk:
+            page.insert_text((cursor, y), chunk, fontname="wqy", fontsize=size,
+                             render_mode=3)
+        cursor += _width(w + " ", size)
+    if taken < len(flat):
+        page.insert_text((cursor, y), flat[taken:], fontname="wqy", fontsize=size,
+                         render_mode=3)
+
+
 # ── 기본서 ──────────────────────────────────────────────────────
 def textbook(path: Path, filler_pages: int = 6):
     doc = pymupdf.open()
@@ -227,40 +250,65 @@ def casebook(path: Path):
 #   · 닫는 대괄호가 통째로 빠진다 (§2.2)
 #   · 각주 참조가 위첨자가 아니라 'NNN)' 으로 떨어진다 (§2.5)
 def scanned_textbook(path: Path):
-    """(종이 모양, OCR 글자) 짝을 만들어 스캔본 PDF 를 짓는다."""
-    W, H, M = 460, 620, 46
+    """(종이 모양, OCR 이 흘린 글자) 짝으로 스캔본을 짓는다.
+
+    실물에서 확인된 것을 그대로 재현한다.
+      · 낱말 사이 공백이 OCR 글자에 없다
+      · 번호와 제목이 다른 줄로 떨어진다 ('3' / '.判例[일외별명일]')
+      · 제목이 파란색이라 강조로 읽힌다
+      · 여는 괄호가 ＜, 닫는 대괄호가 사라짐
+      · 각주 참조가 'NNN)' 로 본문에 떨어짐
+      · ☑ 가 '0' 으로 읽힘
+      · 쪽 아래 꼬리말 '154•윤곽민사소송법'
+    """
+    W, H, M = 470, 700, 46
+    B = BLACK
+    # (y, x, 종이에 인쇄된 글자, 색, OCR 이 흘린 글자)
     rows = [
-        # (y,  종이에 인쇄된 글자,                      색,    OCR 이 흘린 글자)
-        (70,  "051 시효중단", BLACK, "051 시효중단"),
-        (92,  "◎ 의의-방식-시기+관련논점", BLACK, "◎ 의의-방식-시기+관련논점"),
-        (118, "I. 의의 및 취지", BLACK, "I. 의의 및 취지"),
-        (140, "소를 제기하면 시효중단 효력이 있다(제265조).100)", BLACK,
-              "소를 제기하면 시효중단 효력이 있다(제265조). 100)"),
-        (170, "IV. 시효중단(11)", BLACK, "IV. 시효중단(11)"),
-        (196, "1. 문제점", BLACK, "1 .문제점"),
-        (218, "일부청구의 시효중단 범위가 문제된다(92재다226*).", BLACK,
-              "일부청구의 시효중단 범위가 문제된다＜92재다226*)."),
-        (244, "3. 判例", BLACK, "3. 判例"),
-        (266, "(1) 원칙", BLACK, "(1) 원칙"),
-        (288, "[일나시 나소시]", BLUE, "［일나시 나소시"),
-        (310, "나머지 부분은 시효중단 효력이 없다(74다1557).", BLACK,
-              "나머지 부분은 시효중단 효력이 없다＜74다1557)."),
-        (332, "4. 검토", BLACK, "4. 검토"),
-        (354, "확장의 뜻을 밝힌 때에는 전부에 미친다", BLUE,
-              "확장의 뜻을 밝힌 때에는 전부에 미친다"),
-        (376, "고 본다(91다43695*).", BLACK, "고 본다＜91다43695*)."),
+        (70,  M,      "046 일부청구", BLUE, "046일부청구"),
+        (92,  M,      "& 의의 - 소송물 - 시효중단 - 기판력", BLUE,
+                      "&의의-소송물-시효중단-기판력"),
+        (118, M,      "I. 의의", B, "I.의의"),
+        (140, M,      "수량적 가분 채권을 분할 청구하는 것을 말한다.", B,
+                      "수량적가분채권을분할청구하는것을말한다."),
+        (170, M,      "IV. 시효중단(11)", BLUE, "IV.시효중단(11)"),
+        (196, M,      "1. 문제점", BLUE, "1.문제점"),
+        (218, M + 14, "소제기시 시효중단의 효력이 있다(제265조).264)", B,
+                      "소제기시시효중단의효력이있다(제265조).264)"),
+        # 번호와 제목이 다른 줄로 떨어지는 자리
+        (245, M,      "3", BLUE, "3"),
+        (244, M + 15, ". 判例 [일나시 나소시]", BLUE, ".判例[일나시나소시"),
+        (266, M + 14, "일부청구는 나머지 부분에 시효중단 효력이 없다(74다1557).", B,
+                      "일부청구는나머지부분에시효중단효력이없다＜74다1557)."),
+        (292, M,      "4", BLUE, "4"),
+        (291, M + 15, ". 검토", BLUE, ".검토"),
+        (313, M + 14, "확장의 뜻을 밝힌 때에는 전부에 미친다", BLUE,
+                      "확장의뜻을밝힌때에는전부에미친다"),
+        (330, M + 14, "고 본다(91다43695*). 명시적으로 제외265)하였다면 그렇다.", B,
+                      "고본다＜91다43695*).명시적으로제외265)하였다면그렇다."),
+        # ☑ 보너스 논점 박스
+        (365, M,      "☑ 실제로 청구취지 확장하지 않은 부분의 취급", BLUE,
+                      "0실제로청구취지확장하지않은부분의취급"),
+        (388, M + 14, "1. 최고의 효력", B, "1.최고의효력"),
+        (408, M + 14, "6월 내에 조치를 취할 수 있다(2019다223723).", B,
+                      "6월내에조치를취할수있다＜2019다223723)."),
     ]
-    foot = (560, "100) 시효중단. 법률상 기간준수는 소제기시를 기준으로 판단한다.")
+    foots = [
+        (600, "264) 즉, 종전 판시에 요건을 추가한 것이다.", 7.2),
+        (614, "265) 일부 소취하 등이 있을 수 있다.", 7.2),
+    ]
+    footer = (676, "154·윤곽민사소송법", 7.6)
 
     paper = pymupdf.open()
     page = paper.new_page(width=W, height=H)
     page.insert_font(fontname="wqy", fontfile=FONT)
-    for y, shown, color, _ in rows:
-        page.insert_text((M, y), shown, fontname="wqy", fontsize=9, color=color)
-    page.insert_text((W - M - 24, 170), "sE-8", fontname="wqy", fontsize=7, color=BLACK)
-    page.draw_line(pymupdf.Point(M, foot[0] - 10), pymupdf.Point(M + 120, foot[0] - 10),
-                   color=BLACK, width=0.6)
-    page.insert_text((M, foot[0]), foot[1], fontname="wqy", fontsize=7, color=BLACK)
+    for y, x, shown, color, _ in rows:
+        page.insert_text((x, y), shown, fontname="wqy", fontsize=9, color=color)
+    page.insert_text((W - M - 24, 170), "sE-8", fontname="wqy", fontsize=7, color=B)
+    for y, text, size in foots:
+        page.insert_text((M, y), text, fontname="wqy", fontsize=size, color=B)
+    page.insert_text((M, footer[0]), footer[1], fontname="wqy",
+                     fontsize=footer[2], color=B)
     pix = page.get_pixmap(dpi=200)
     paper.close()
 
@@ -268,10 +316,13 @@ def scanned_textbook(path: Path):
     out = scan.new_page(width=W, height=H)
     out.insert_image(pymupdf.Rect(0, 0, W, H), pixmap=pix)
     out.insert_font(fontname="wqy", fontfile=FONT)
-    for y, _, _, ocr in rows:
-        out.insert_text((M, y), ocr, fontname="wqy", fontsize=9, render_mode=3)
+    for y, x, shown, _, ocr in rows:
+        _place_ocr(out, x, y, shown, ocr, 9)
     out.insert_text((W - M - 24, 170), "sE-8", fontname="wqy", fontsize=7, render_mode=3)
-    out.insert_text((M, foot[0]), foot[1], fontname="wqy", fontsize=7, render_mode=3)
+    for y, text, size in foots:
+        out.insert_text((M, y), text, fontname="wqy", fontsize=size, render_mode=3)
+    out.insert_text((M, footer[0]), footer[1], fontname="wqy",
+                    fontsize=footer[2], render_mode=3)
     scan.save(str(path))
     scan.close()
 
