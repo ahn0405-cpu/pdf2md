@@ -18,7 +18,8 @@ import subprocess
 from collections import Counter
 from dataclasses import dataclass, field, asdict
 
-from .color import ImageColorSampler, Palette, is_black, to_hex, to_rgb
+from .color import (ImageColorSampler, Palette, is_black, page_image_dpi,
+                    to_hex, to_rgb)
 from .patterns import Patterns
 
 _HANJA = re.compile(r"[一-鿿豈-﫿]")
@@ -72,6 +73,7 @@ def run(pdf_path: str, cfg: dict, sample: int = 24, layout_pages: int = 3,
     sizes: Counter = Counter()
     draw_colors: Counter = Counter()
     image_count: Counter = Counter()
+    image_dpis: list[float] = []
     coverage: list[float] = []
     span_boxes: dict[int, list] = {}
 
@@ -104,6 +106,9 @@ def run(pdf_path: str, cfg: dict, sample: int = 24, layout_pages: int = 3,
                 biggest = max(biggest, abs((x1 - x0) * (y1 - y0)) / area)
         image_count[len(page.get_images())] += 1
         coverage.append(round(biggest, 3))
+        native = page_image_dpi(page)
+        if native:
+            image_dpis.append(native)
 
         # 옆번호는 조판 상세 3쪽만 보면 놓친다. 표본 전체에서 찾는다 (§4.3).
         margin_x = page.rect.width * float(cfg["legend"]["sidenote"]["margin_ratio"])
@@ -139,6 +144,7 @@ def run(pdf_path: str, cfg: dict, sample: int = 24, layout_pages: int = 3,
             problems[f"{m.group(1)}-{m.group(2)}"] += 1
 
     body_size = sizes.most_common(1)[0][0] if sizes else 10.0
+    image_dpi = sorted(image_dpis)[len(image_dpis) // 2] if image_dpis else 0.0
 
     # 글자에 색이 없고 쪽이 그림으로 덮여 있으면, 색은 그림에만 남아 있다 (§2.4).
     image_palette = Palette(cfg=color_cfg)
@@ -188,6 +194,7 @@ def run(pdf_path: str, cfg: dict, sample: int = 24, layout_pages: int = 3,
         "profile_hint": "textbook",
         "images": {
             "per_page": image_count.most_common(5),
+            "dpi": image_dpi,
             "max_coverage": max_cov,
             "scanned_with_text_layer": max_cov >= 0.5 and not scanned,
         },
@@ -410,6 +417,9 @@ def report(d: dict, cfg: dict) -> str:
         a("")
         a(f"- 쪽을 덮는 그림의 최대 비율: **{img['max_coverage']:.0%}**")
         a(f"- 쪽당 그림 수: " + ", ".join(f"{k}장×{v}쪽" for k, v in img["per_page"][:4]))
+        if img.get("dpi"):
+            a(f"- 그림 해상도: **{img['dpi']:.0f} dpi** "
+              f"(색은 이 해상도에 맞춰 읽는다, §2.4)")
         if img.get("scanned_with_text_layer"):
             a("")
             a("- ⚠️ **종이를 스캔한 그림 위에 OCR 텍스트가 얹힌 PDF다.**")

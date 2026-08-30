@@ -78,6 +78,38 @@ class Palette:
         return markup.get("emphasis", "==")
 
 
+def page_image_dpi(page) -> float:
+    """쪽에 박힌 그림의 실제 해상도(가로 dpi). 없으면 0."""
+    best = 0.0
+    try:
+        for info in page.get_images(full=True):
+            rects = page.get_image_rects(info[0])
+            if not rects or not rects[0].width:
+                continue
+            best = max(best, info[2] / rects[0].width * 72)
+    except Exception:                       # pragma: no cover
+        return 0.0
+    return best
+
+
+def _pick_dpi(page, cfg: dict) -> int:
+    """색을 읽을 해상도.
+
+    원본 그림보다 높게 렌더링해 봐야 없는 화소를 늘리는 것뿐이라 얻을 게 없다.
+    반대로 너무 낮으면 글자 획이 한 화소 아래로 얇아져 종이와 섞이고, 색이
+    옅어져 판정이 흔들린다. 그래서 원본 해상도에 맞추되 위아래로 가둔다.
+    """
+    want = cfg.get("image_dpi", "auto")
+    if isinstance(want, (int, float)):
+        return int(want)
+    native = page_image_dpi(page)
+    lo = int(cfg.get("image_dpi_min", 100))
+    hi = int(cfg.get("image_dpi_max", 200))
+    if native <= 0:
+        return lo
+    return max(lo, min(hi, int(round(native))))
+
+
 def from_hex(value: str) -> tuple[int, int, int]:
     v = value.lstrip("#")
     return tuple(int(v[i:i + 2], 16) for i in (0, 2, 4))
@@ -145,7 +177,7 @@ class ImageColorSampler:
 
     def __init__(self, page, cfg: dict):
         self.cfg = cfg
-        self.dpi = int(cfg.get("image_dpi", 110))
+        self.dpi = _pick_dpi(page, cfg)
         self.ink_max = int(cfg.get("ink_max", 205))
         self.chroma_min = int(cfg.get("chroma_min", 42))
         self.min_ratio = float(cfg.get("min_ratio", 0.34))

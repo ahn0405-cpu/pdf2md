@@ -55,6 +55,7 @@ def scan(pdf_path: str, cfg: dict, sample: int = 40, pages=None) -> str:
     sides: list[tuple[int, str, float, float]] = []
     small_lines: Counter = Counter()
     sizes: Counter = Counter()
+    images: list[dict] = []
 
     for i in idx:
         page = doc[i]
@@ -101,6 +102,22 @@ def scan(pdf_path: str, cfg: dict, sample: int = 40, pages=None) -> str:
                 mx = max((s["size"] for s in line.get("spans", [])), default=0)
                 if mx and mx < body * 0.92:
                     small_lines[round(line["bbox"][1] / page.rect.height, 1)] += 1
+
+        if len(images) < 12:
+            area = page.rect.width * page.rect.height
+            for info in page.get_images(full=True):
+                xref, _, w, h, bpc, cs = info[0], info[1], info[2], info[3], info[4], info[5]
+                rects = page.get_image_rects(xref)
+                if not rects:
+                    continue
+                r = rects[0]
+                images.append({
+                    "page": i + 1, "w": w, "h": h,
+                    "dx": (w / r.width * 72) if r.width else 0,
+                    "dy": (h / r.height * 72) if r.height else 0,
+                    "cs": cs or "?", "bpc": bpc,
+                    "cov": (r.width * r.height / area) if area else 0,
+                })
 
         for dr in page.get_drawings():
             for key, tally in (("fill", draw_fill), ("color", draw_stroke)):
@@ -188,6 +205,32 @@ def scan(pdf_path: str, cfg: dict, sample: int = 40, pages=None) -> str:
                  "그 값을 낮춰야 여백으로 잡힌다.")
     else:
         L.append("표본에 없음.")
+    L.append("")
+
+    L += ["## 쪽 그림 해상도", "",
+          "색을 그림에서 읽을 때(§2.4) 이 값이 품질을 좌우한다.", ""]
+    if images:
+        L.append("| 쪽 | 넓이×높이(px) | 가로 dpi | 세로 dpi | 색공간 | bpc | 쪽 덮은 비율 |")
+        L.append("|---:|---|---:|---:|---|---:|---:|")
+        for row in images[:12]:
+            L.append("| {page} | {w:,}×{h:,} | {dx:.0f} | {dy:.0f} | {cs} | {bpc} "
+                     "| {cov:.0%} |".format(**row))
+        dpis = sorted(r["dx"] for r in images)
+        mid = dpis[len(dpis) // 2]
+        L.append("")
+        L.append(f"- 가로 dpi 중앙값: **{mid:.0f}**")
+        L.append(f"- 지금 설정된 표본 해상도: `preserve.color.image_dpi` = "
+                 f"**{cfg['preserve']['color'].get('image_dpi', 110)}**")
+        if mid < 100:
+            L.append("- ⚠️ 원본이 낮다. 색 판정이 흔들릴 수 있으니 결과를 꼼꼼히 볼 것.")
+        elif cfg["preserve"]["color"].get("image_dpi", 110) > mid:
+            L.append("- ⚠️ 표본 해상도가 원본보다 높다. 더 얻을 것이 없으니 "
+                     "`image_dpi` 를 원본 값까지 낮추면 그만큼 빨라진다.")
+        else:
+            L.append(f"- `image_dpi` 를 최대 {mid:.0f} 까지 올리면 글자 획이 "
+                     f"두껍게 잡혀 색 판정이 또렷해진다. 그 위로는 얻을 것이 없다.")
+    else:
+        L.append("쪽에 박힌 그림이 없다. 스캔본이 아니라 born-digital PDF다.")
     L.append("")
 
     L += ["## 작은 글자가 있는 세로 위치", "",
