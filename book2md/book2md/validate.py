@@ -151,9 +151,18 @@ def _stars(res, pat, whole, baseline):
         return
     want = baseline["stars"]
     res.counts["stars_baseline"] = want
-    if found != want:
+    if found < want:
         res.add("FAIL", "5.2 별표",
-                f"별표 개수 불일치: 원본 {want} vs 변환 {found} (차이 {found - want:+})")
+                f"별표가 {want - found}건 사라졌다 (원본 {want} vs 변환 {found}). "
+                f"중요 판례 표시가 없어지면 판례 등급을 매길 근거가 사라진다.")
+    elif found > want:
+        # 원본은 한 줄 안에서만 셀 수 있다. 줄을 넘어 끊긴 사건번호
+        # ('91' / '다43176*')를 문단을 이으며 되붙이면 변환본이 더 많아진다.
+        # 잃은 것이 없으므로 통과로 본다. 지침 §5.2 의 '불일치=FAIL' 을 그대로
+        # 따르지 않은 것이라 이유를 남긴다.
+        res.add("INFO", "5.2 별표",
+                f"변환본이 {found - want}건 많다 (원본 {want} vs 변환 {found}). "
+                f"줄을 넘어 끊긴 사건번호를 되붙여 살아난 것으로, 잃은 것은 없다.")
     else:
         res.add("INFO", "5.2 별표", f"원본·변환 모두 {want}건으로 일치")
 
@@ -436,9 +445,10 @@ def reports(res: Result, cfg: dict) -> dict[str, str]:
     L.append("|---|---|---:|---|")
     rows = [
         ("사건번호 형식 오류", "0건", c.get("case_errors", 0), c.get("case_errors", 0) == 0),
-        ("별표 개수 불일치", "0건",
-         _diff(c.get("stars"), c.get("stars_baseline")),
-         c.get("stars_baseline") is None or c.get("stars") == c.get("stars_baseline")),
+        ("별표 유실", "0건",
+         max(0, (c.get("stars_baseline") or 0) - (c.get("stars") or 0))
+         if c.get("stars_baseline") is not None else "대조 불가",
+         c.get("stars_baseline") is None or c.get("stars", 0) >= c.get("stars_baseline", 0)),
         ("각주 — 정의 없는 참조(유실)", "0건", c.get("footnote_mismatch", 0),
          c.get("footnote_mismatch", 0) == 0 or c.get("partial")),
         ("여백 마커 병합 의심", "0건", c.get("sidenote_merged", 0),

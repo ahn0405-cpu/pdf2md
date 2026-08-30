@@ -80,6 +80,7 @@ class Structurer:
         self._score_max = float(prof.get("score_max", 50))
         self._last_problem: Block | None = None
         self._ans_max = int(prof.get("answer_heading_max_len", 40))
+        self._question_end = tuple(prof.get("question_endings", []))
         self._prompt = tuple(prof.get("prompt_markers", []))
         self._answer = tuple(prof.get("answer_markers", []))
 
@@ -170,8 +171,9 @@ class Structurer:
                 self._in_prompt = False
                 title = m.group(3).strip()
                 score, title = _split_score(self._score_rx, title, self._score_max)
+                # 문제 번호 옆 대괄호는 논점 태그이지 두문자가 아니다 (§6.2).
                 self._heading(2, f"{m.group(1)}-{m.group(2)}. {title}",
-                              page_no, score=score)
+                              page_no, score=score, mnemonics=False)
                 self._last_problem = self.blocks[-1]
                 return
         bare = plain.strip("【】[]()（） ")
@@ -200,13 +202,16 @@ class Structurer:
             # 배점 괄호 때문에 문장처럼 보이지만 제목이다.
             if len(title) > self._ans_max or _SENT_END.search(title):
                 continue
+            if self._question_end and title.rstrip(" .?").endswith(self._question_end):
+                continue        # '…설명하시오' 는 설문이지 답안 목차가 아니다
             self._heading(level, title, page_no, score=score)
             return
         self._paragraph(text, page_no)
 
     # ── 공통 ────────────────────────────────────────────────────
     def _heading(self, level: int, text: str, page_no: int,
-                 score: str | None = None, y: float | None = None) -> None:
+                 score: str | None = None, y: float | None = None,
+                 mnemonics: bool = True) -> None:
         self._flush_para()
         if level <= self.flush_level:
             self._flush_footnotes()
@@ -223,7 +228,7 @@ class Structurer:
         if side:
             meta["sidenote"] = side
 
-        body = _inline(self.pat, title)
+        body = _inline(self.pat, title) if mnemonics else title
         for y in years:
             body += f" `({str(y)[2:]})`"
         if side:

@@ -237,10 +237,21 @@ class 구조화(unittest.TestCase):
                            ["E-5. [일부청구-시효중단]", "문제 (10점)", "지문이다.",
                             "답안", "2. 일부청구 소송물 (2.5)", "(2) 判例 (74다1557)"])
         md = render(blocks)
+        # 문제 번호 옆 대괄호는 논점 태그이지 두문자가 아니다 (§6.2)
         self.assertIn("## E-5. [일부청구-시효중단] `10점`", md)
         self.assertIn("> 지문이다.", md)
         self.assertIn("### 2. 일부청구 소송물 `2.5`", md)
         self.assertIn("(74다1557)", md)              # 배점 규칙이 사건번호를 안 먹는다
+
+    def test_설문은_답안_목차로_잡지_않는다(self):
+        blocks = self._run("casebook",
+                           ["E-9. [관할]", "답안",
+                            "(1) 이송결정이 적법한지 설명하시오 (12)",
+                            "(1) 학설"])
+        md = render(blocks)
+        self.assertNotIn("#### (1) 이송결정이 적법한지", md)   # 설문
+        self.assertIn("#### (1) 학설", md)                    # 답안 목차
+        self.assertIn("## E-9. [관할]", md)                    # 태그는 백틱 없이
 
     def test_배점_규칙이_사건번호를_망가뜨리지_않는다(self):
         blocks = self._run("casebook", ["E-1. 시험", "(3) 判例 (2019다223723)"])
