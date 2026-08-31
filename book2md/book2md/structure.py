@@ -94,6 +94,10 @@ class Structurer:
         self._outline_junk = int(prof.get("outline_junk_max", 4))
         self._band_lead = (cfg.get("legend", {}).get("outline", {})
                            .get("lead_marker"))
+        self._never_head = [re.compile(p) for p in
+                            (cfg.get("running", {}).get("never_heading") or [])]
+        #: 여기서 걷어낸 줄. 파이프라인이 removed_lines.md 에 함께 적는다.
+        self.dropped: list = []
         self._outline_tail = int(prof.get("outline_tail_max", 12))
         self._heads = [(h["level"], re.compile(h["pattern"]))
                        for h in prof.get("headings", [])]
@@ -160,6 +164,11 @@ class Structurer:
 
     # ── 기본서 (§6.1) ────────────────────────────────────────────
     def _feed_textbook(self, text: str, plain: str, line, page_no: int) -> None:
+        # 머리말이 영역 판정을 빠져나와 절 제목이 되면 그 아래 본문이 통째로
+        # 엉뚱한 절에 붙는다. 영역이 놓친 자리를 글자로 한 번 더 막는다.
+        if any(rx.search(plain) for rx in self._never_head):
+            self.dropped.append((page_no, "머리말·꼬리말", plain.strip()))
+            return
         # 제목과 본문이 한 줄에 붙어 있는 자리 (§6.1). 저자가 제목만 색으로
         # 칠해 두었으므로 색이 경계를 알려 준다. 이걸 안 가르면 문단 전체가
         # 제목이 되거나, 길이 때문에 제목이 통째로 본문에 묻힌다.

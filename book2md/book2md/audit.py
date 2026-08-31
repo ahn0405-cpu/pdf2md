@@ -41,9 +41,13 @@ def similar(band_key: str, sec_key: str) -> bool:
         띠 '본안신청'       ↔ 절 '본안의 신청'
         띠 '사해행위 법적평가' ↔ 절 '사해행위의 법률적 평가를 달리 주장'
 
-    앞 글자를 맞춘 채 띠의 글자가 절 안에 **순서대로** 나오고, 그 구간이
-    지나치게 벌어지지 않으면 같은 것으로 본다. 세 글자 이하는 순서만 보면
-    아무 데나 걸리므로('의의' 가 '소송물의 의미' 에) 한 글자 차이까지만 본다.
+    띠의 글자가 절 안에 **순서대로** 나오고 그 구간이 지나치게 벌어지지
+    않으면 같은 것으로 본다. 첫 글자가 맞아야 한다고 걸면 절이 앞에 말을
+    더 붙인 경우를 놓친다 — 띠 '형성권행사소멸' ↔ 절 'I. 소송상 형성권
+    행사의 효력 소멸시 취급'. 그래서 시작 자리는 안 따지고 구간 길이로만 죈다.
+
+    세 글자 이하는 순서만 보면 아무 데나 걸리므로('의의' 가 '소송물의 의미' 에)
+    한 글자 차이까지만 본다.
     """
     if not band_key or not sec_key:
         return False
@@ -56,16 +60,16 @@ def similar(band_key: str, sec_key: str) -> bool:
     if len(band_key) <= 3:
         head = sec_key[:len(band_key)]
         return bool(head) and _distance(band_key, head) <= 1
-    if sec_key[0] != band_key[0]:
-        return False
-    j, last = 0, -1
+    j, first, last = 0, -1, -1
     for ch in band_key:
         j = sec_key.find(ch, j)
         if j < 0:
             return False
+        if first < 0:
+            first = j
         last = j
         j += 1
-    return last + 1 <= len(band_key) * 2
+    return last - first + 1 <= len(band_key) * 2
 
 
 def _key(text: str) -> str:
@@ -222,7 +226,11 @@ def _near(band: list, key: str) -> str | None:
 
 
 def classify(data: dict, repeat_min: int = 3, book_words=()) -> dict:
-    """가짜 절 후보를 유형별로 가른다. **고치지 않는다. 세기만 한다.**"""
+    """가짜 절 후보를 유형별로 가른다. **고치지 않는다. 세기만 한다.**
+
+    `repeat_min` 은 이제 판정에 쓰지 않는다. 리포트에 '같은 제목이 N곳에 있다'
+    로 보여줄 뿐이다 — 반복은 정상 절의 성질이지 머리말의 표지가 아니다.
+    """
     secs, repeat, bands = data["sections"], data["repeat"], data["bands"]
     words = tuple(w for w in book_words if w)
     out: dict = {"목차_띠가_절이_됨": [], "목차_두_번_씀": [], "머리말로_보임": [],
@@ -266,9 +274,11 @@ def classify(data: dict, repeat_min: int = 3, book_words=()) -> dict:
         # 여러 논점에 되풀이되면 머리말이 절 규칙에 걸린 것이다. 반복만
         # 세면 안 된다 — 'I. 의의' 도 논점마다 나온다. 목차에 없다는
         # 조건이 함께 걸려야 걸러진다.
-        if repeat[s.key] >= repeat_min:
-            out["머리말로_보임"].append(s)
-        elif s.junk:
+        # 반복 횟수는 판정에 쓰지 않는다. 'I. 의의 및 취지' 는 77곳에 있는데
+        # 논점이 135개라 당연하다. 한 파일에 논점이 여럿이고 띠가 그중 하나만
+        # 잡히면 나머지 논점의 정형 절이 전부 걸린다 (실측 108_109 의
+        # 'I. 의의', 'II. 종류'). 책 제목으로만 가른다 — 위에서 이미 봤다.
+        if s.junk:
             out["잡글자_섞임"].append(s)
         else:
             out["목차에_없음"].append(s)

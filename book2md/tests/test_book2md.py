@@ -1582,6 +1582,33 @@ parser: pymupdf
         self.assertIn("⚠️ 근거", out)
 
 
+class 머리말이_절이_되는_것(unittest.TestCase):
+    """실측 'VIII • 윤곽 민사소송법' — 로마자 절 규칙에 그대로 걸린다."""
+
+    def _run(self, lines):
+        from book2md.structure import Structurer, render
+        from book2md.model import Line, Page
+        prof = dict(get_profile(CFG, "textbook"))
+        prof["_config"] = CFG
+        st = Structurer(CFG, prof, PAT)
+        st.feed(Page(number=232, lines=[Line(text=t, size=10) for t in lines]), [])
+        return render(st.finish()), st.dropped
+
+    def test_책_제목이_든_줄은_절이_되지_않는다(self):
+        out, dropped = self._run(["034 대위소", "==◎ 의의-내용-효과==",
+                                  "I. 의의", "본문 …",
+                                  "VIII • 윤곽 민사소송법",
+                                  "II. 내용", "본문 …"])
+        heads = [l for l in out.split("\n") if l.startswith("#")]
+        self.assertEqual(heads, ["### 034 대위소", "#### I. 의의", "#### II. 내용"])
+        self.assertEqual(dropped, [(232, "머리말·꼬리말", "VIII • 윤곽 민사소송법")])
+
+    def test_걷어낸_줄은_기록에_남는다(self):
+        """글자를 잃지 않는다. removed_lines.md 로 사람이 되짚을 수 있어야 한다."""
+        _, dropped = self._run(["XII • 윤곽 민사소송법"])
+        self.assertTrue(dropped)
+
+
 class 절제목_전수점검(unittest.TestCase):
     """`convert audit-sections` — 고치기 전에 몇 건인지부터 센다.
 
@@ -1803,12 +1830,17 @@ parser: pymupdf
         self.assertNotIn("I. 의의 및 취지", self._titles("목차_두_번_씀"))
         self.assertNotIn("II. 내용", self._titles("목차_두_번_씀"))
 
-    def test_되풀이되는_머리말이_절로_선_것을_잡는다(self):
-        self.assertEqual(set(self._titles("머리말로_보임")), {"VIII • 윤곽 민사소송법"})
+    def test_반복_횟수만으로는_머리말로_보지_않는다(self):
+        """반복은 정상 절의 성질이다. 'I. 의의 및 취지' 는 77곳에 있다."""
+        self.assertEqual(self._titles("머리말로_보임"), [])
+        k = self.audit.classify(self.data, book_words=["윤곽 민사소송법"])
+        self.assertEqual(set(x.title for x in k["머리말로_보임"]),
+                         {"VIII • 윤곽 민사소송법"})
 
     def test_논점마다_나오는_진짜_절은_머리말로_보지_않는다(self):
         """'I. 의의' 도 논점마다 나온다. 반복만 세면 이것이 걸린다."""
-        모두 = sum(self.kinds.values(), []) if False else self._titles("머리말로_보임")
+        k = self.audit.classify(self.data, book_words=["윤곽 민사소송법"])
+        모두 = [x.title for x in k["머리말로_보임"]]
         self.assertNotIn("I. 의의", 모두)
         self.assertNotIn("II. 내용", 모두)
 

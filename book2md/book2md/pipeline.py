@@ -205,9 +205,10 @@ class Pipeline:
             found = collector.process(page)
             st.feed(page, found)
             pages += 1
+        blocks = st.finish()
+        dropped.extend(st.dropped)
         (self.reports / "removed_lines.md").write_text(
             _removed_report(dropped, self.changes), encoding="utf-8")
-        blocks = st.finish()
         emph, standard = _emphasis_by_page(blocks, self.cfg)
         self._update_baseline(absorbed=st.absorbed_chars, line_chars=st.seen_chars,
                               emphasis_by_page=emph, standard_pages=standard)
