@@ -357,3 +357,105 @@ def report(data: dict, kinds: dict, limit: int = 200) -> str:
     if len(items) > limit:
         L.append(f"- … 그리고 {len(items) - limit}건 더")
     return "\n".join(L) + "\n"
+
+
+# ── 묻힌 절과 놓친 띠 찾기 ────────────────────────────────────────
+_LOOSE_BAND = re.compile(r"^\s*(?:==)?\s*[&◎@※＆⊙○●]?\s*(?P<items>.+?)\s*(?:==)?\s*$")
+
+
+def find_buried(data: dict, head: int = 40, per_item: int = 3) -> list:
+    """절이 안 선 목차 항목이 본문 어느 줄에 묻혀 있는지 찾는다.
+
+    글자는 사라지지 않았다. 번호 자리가 뭉개져 헤딩으로만 안 잡힌 것이다
+    (SKILL.md §1). 그러니 본문에서 제목 글자를 찾으면 자리를 짚을 수 있다.
+    **고치지 않는다.** 어느 줄인지 알려줄 뿐이다.
+    """
+    out = []
+    for (path, bi), items in sorted(data["unused"].items()):
+        text = Path(path).read_text(encoding="utf-8")
+        m = _FM.match(text)
+        body, off = (text[m.end():], m.group(0).count("\n")) if m else (text, 0)
+        lines = body.splitlines()
+        for name in items:
+            k = _key(name)
+            if not k:
+                continue
+            hits = []
+            for i, line in enumerate(lines, start=off + 1):
+                s = line.strip()
+                if not s or _HEAD.match(s) or _BAND.match(s):
+                    continue
+                if similar(k, _key(s[:head])):
+                    hits.append((i, s[:100]))
+                if len(hits) >= per_item:
+                    break
+            out.append((Path(path), bi, name, hits))
+    return out
+
+
+def find_bands(data: dict, cfg: dict, limit: int = 6) -> list:
+    """띠를 못 읽은 파일에서 띠일 법한 줄을 찾는다.
+
+    띠가 없는 것인지 우리가 못 읽은 것인지 가려야 한다. 띠는 이 점검과
+    제목 복구와 검증 셋 모두의 근거라, 못 읽었다면 그것부터 고쳐야 한다.
+    """
+    ol = (cfg.get("legend") or {}).get("outline") or {}
+    sep = ol.get("separator", r"[-–—>»/·+]")
+    # _BAND_HEAD 는 표지 뒤 한 글자까지 물고 있어(판정용) 여기 쓰면 '개시' 가
+    # '시' 가 된다. 자르는 데는 설정의 표지 규칙을 쓴다.
+    lead = ol.get("lead_marker", r"^[&◎@※＆⊙○●\s]+")
+    max_len = int(ol.get("max_item_len", 10))
+    out = []
+    for path in data["files"]:
+        if data["bands"].get(path):
+            continue
+        text = Path(path).read_text(encoding="utf-8")
+        m = _FM.match(text)
+        body, off = (text[m.end():], m.group(0).count("\n")) if m else (text, 0)
+        cands = []
+        for i, line in enumerate(body.splitlines(), start=off + 1):
+            s = re.sub(r"[=*`]+", "", line).strip()
+            if not s or len(s) > 60 or _HEAD.match(line.strip()):
+                continue
+            if re.search(r"(?:[.?!]|다\.|음\.|함\.)\s*$", s):
+                continue
+            items = [t.strip() for t in re.split(sep, re.sub(lead, "", s))
+                     if t.strip()]
+            if len(items) < 2 or any(len(t) > max_len for t in items):
+                continue
+            cands.append((i, line.strip()[:100], items))
+            if len(cands) >= limit:
+                break
+        out.append((path, cands))
+    return out
+
+
+def extra_report(data: dict, cfg: dict) -> str:
+    root = data["root"]
+
+    def rel(p):
+        try:
+            return str(Path(p).relative_to(root))
+        except Exception:
+            return str(p)
+
+    buried = find_buried(data)
+    L = ["", "## 묻힌 절은 어느 줄에 있나", "",
+         "글자는 사라지지 않았다. 번호 자리가 뭉개져 헤딩으로만 안 잡힌 것이다.",
+         "아래 줄을 원본과 견주어 무엇이 번호 자리를 망가뜨렸는지 보면 된다.", ""]
+    for path, bi, name, hits in buried:
+        L.append(f"- `{rel(path)}` (띠 {bi + 1}) — `{name}`")
+        if not hits:
+            L.append("  - 본문에서 못 찾았다. 정말 빠졌을 수 있다 — 원본 확인 필요")
+        for i, s in hits:
+            L.append(f"  - `:{i}` {s}")
+    L += ["", "## 띠를 못 읽은 파일 — 띠일 법한 줄", "",
+          "띠가 없는 것인지 우리가 못 읽은 것인지 가려야 한다. 띠는 제목 복구·",
+          "검증·이 점검 셋 모두의 근거다.", ""]
+    for path, cands in find_bands(data, cfg):
+        L.append(f"- `{rel(path)}`")
+        if not cands:
+            L.append("  - 띠일 법한 줄이 없다. 저자가 안 적은 논점으로 보인다")
+        for i, s, items in cands:
+            L.append(f"  - `:{i}` {s}   → 토막 {len(items)}개")
+    return "\n".join(L) + "\n"

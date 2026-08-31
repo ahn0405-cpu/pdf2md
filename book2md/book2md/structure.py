@@ -497,8 +497,15 @@ class Structurer:
         if any(len(t) > int(self._outline.get("max_item_len", 10)) for t in items):
             return []
         keys = set(self._outline["keywords"])
-        if sum(1 for t in items if t in keys) < int(self._outline.get("min_known", 1)):
-            return []
+        known = sum(1 for t in items if t in keys)
+        if known < int(self._outline.get("min_known", 1)):
+            # 표지(◎ & ※)가 붙고 토막이 넉넉하면 아는 낱말을 요구하지 않는다.
+            # 낱말 목록은 교재마다 다르다. 실측 '◎ 개시 – 진행 – 종결 – 재개'
+            # 는 넷 다 목록에 없어서 띠가 아니라고 판정됐고, 그 논점의 절
+            # 다섯이 통째로 근거를 잃었다. 표지는 저자가 찍은 것이라 목록보다
+            # 확실한 증거다.
+            if not (marked and len(items) >= int(self._outline["min_items"])):
+                return []
         return items
 
     # ── 블록 만들기 ──────────────────────────────────────────────

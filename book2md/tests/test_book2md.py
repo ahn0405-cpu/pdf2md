@@ -1582,6 +1582,110 @@ parser: pymupdf
         self.assertIn("⚠️ 근거", out)
 
 
+class 목차띠_읽기(unittest.TestCase):
+    """띠는 제목 복구·검증·절 점검 셋 모두의 근거다. 못 읽으면 다 무너진다."""
+
+    def _band(self, line):
+        from book2md.structure import Structurer
+        from book2md.model import Line, Page
+        prof = dict(get_profile(CFG, "textbook"))
+        prof["_config"] = CFG
+        st = Structurer(CFG, prof, PAT)
+        st.feed(Page(number=1, lines=[Line(text=t, size=10)
+                                      for t in ["058 논점", line,
+                                                "仁j 개시", "본문이다."]]), [])
+        blocks = st.finish()
+        return ([b.meta.get("outline") for b in blocks if b.meta.get("outline")],
+                [b.text for b in blocks if b.kind == "heading"])
+
+    def test_표지가_있으면_아는_낱말을_요구하지_않는다(self):
+        """실측 '◎ 개시 – 진행 – 종결 – 재개' — 넷 다 낱말 목록에 없다.
+
+        목록은 교재마다 다르다. 표지는 저자가 찍은 것이라 목록보다 확실하다.
+        이걸 못 읽어 그 논점의 절 다섯이 통째로 근거를 잃었다.
+        """
+        band, heads = self._band("◎ 개시 – 진행 – 종결 – 재개")
+        self.assertEqual(band, [["개시", "진행", "종결", "재개"]])
+        # 띠를 읽으면 묻혀 있던 제목이 되살아난다
+        self.assertIn("仁j 개시", heads)
+
+    def test_표지가_있어도_토막이_적고_아는_낱말이_없으면_띠가_아니다(self):
+        band, _ = self._band("◎ 서울 – 부산")
+        self.assertEqual(band, [])
+
+    def test_아는_낱말이_있으면_표지_없이도_띠다(self):
+        band, _ = self._band("의의 - 내용 - 효과")
+        self.assertEqual(band, [["의의", "내용", "효과"]])
+
+
+class 묻힌_절_찾기(unittest.TestCase):
+    """`audit-sections` 이 절이 안 선 목차 항목의 자리를 짚어 준다."""
+
+    def setUp(self):
+        from book2md import audit
+        self.audit = audit
+        self.tmp = Path(tempfile.mkdtemp())
+        (self.tmp / "기본서").mkdir()
+
+    def tearDown(self):
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def _write(self, name, text):
+        (self.tmp / "기본서" / name).write_text(text, encoding="utf-8")
+
+    def test_묻힌_절이_몇째_줄에_있는지_짚는다(self):
+        self._write("87_088서증.md", """---
+source: 기본서
+chapter: "088 서증"
+outline: ["의의", "형식적증거력", "실질적증거력"]
+parser: pymupdf
+---
+
+### 088 서증
+
+==& 의의 - 형식적증거력 - 실질적증거력==
+
+#### I. 의의
+
+서증이란 문서를 열람하여 …
+
+匚l 형식적 증거력
+
+문서가 거증자의 주장대로 작성된 것을 말한다.
+
+#### III. 실질적증거력
+""")
+        data = self.audit.scan(self.tmp, CFG)
+        found = {name: hits for _, _, name, hits in self.audit.find_buried(data)}
+        self.assertIn("형식적증거력", found)
+        self.assertTrue(found["형식적증거력"], "본문에서 찾았어야 한다")
+        line, text = found["형식적증거력"][0]
+        self.assertEqual(line, 16)
+        self.assertIn("형식적 증거력", text)
+
+    def test_띠를_못_읽은_파일에서_띠일_법한_줄을_찾는다(self):
+        self._write("57_058변론.md", """---
+source: 기본서
+chapter: "058 변론"
+parser: pymupdf
+---
+
+### 058 변론
+
+◎ 개시 – 진행 – 종결 – 재개
+
+#### I. 변론의 개시
+
+본문 …
+""")
+        data = self.audit.scan(self.tmp, CFG)
+        got = self.audit.find_bands(data, CFG)
+        self.assertEqual(len(got), 1)
+        _, cands = got[0]
+        self.assertTrue(cands)
+        self.assertEqual(cands[0][2], ["개시", "진행", "종결", "재개"])
+
+
 class 머리말이_절이_되는_것(unittest.TestCase):
     """실측 'VIII • 윤곽 민사소송법' — 로마자 절 규칙에 그대로 걸린다."""
 

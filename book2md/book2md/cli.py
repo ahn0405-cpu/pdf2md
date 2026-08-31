@@ -131,6 +131,8 @@ def main(argv=None) -> int:
     au.add_argument("--book-words", default="",
                     help="책 제목 등 머리말에 들어가는 말. 쉼표로 구분")
     au.add_argument("--limit", type=int, default=200, help="유형마다 보여줄 건수")
+    au.add_argument("--no-hints", action="store_true",
+                    help="묻힌 절·놓친 띠 찾기를 건너뛴다")
 
     sub.add_parser("parsers", help="쓸 수 있는 파서 보기")
 
@@ -153,6 +155,8 @@ def _cmd_audit_sections(args, cfg) -> int:
     words = [w.strip() for w in args.book_words.split(",") if w.strip()]
     kinds = audit_mod.classify(data, repeat_min=args.repeat_min, book_words=words)
     text = audit_mod.report(data, kinds, limit=args.limit)
+    if not args.no_hints:
+        text += audit_mod.extra_report(data, cfg)
     if args.out:
         Path(args.out).write_text(text, encoding="utf-8")
         print(f"→ {args.out}")
