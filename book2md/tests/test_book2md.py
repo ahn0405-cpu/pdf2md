@@ -1600,6 +1600,8 @@ parser: pymupdf
 
 ==& 의의 - 내용 - 예외 - 효과 - 관련논점==
 
+#### ◎ 의의-내용
+
 #### I. 의의 및 취지
 
 신의성실의 원칙이란 …
@@ -1666,6 +1668,71 @@ parser: pymupdf
         """'I. 의의 및 취지' 가 이미 '의의' 를 썼다. '(D 의의' 는 그 다음이다."""
         self.assertEqual(self._titles("목차_두_번_씀"), ["(D 의의"])
 
+    def test_목차_띠가_절_제목이_된_것을_잡는다(self):
+        """'◎ 의의-내용' 이 절이 되면 띠가 사라져 그 뒤 판정이 전부 어긋난다."""
+        self.assertEqual(self._titles("목차_띠가_절이_됨"), ["◎ 의의-내용"])
+
+    def test_번호가_성한_절은_목차를_나눠_써도_된다(self):
+        """'III. 요건-당사자 동일' 과 'IV. 요건-소송물 동일' 은 둘 다 진짜다.
+
+        실측 96_097재소금지원칙: 목차 항목 '요건' 하나를 절 셋이 나눠 쓴다.
+        번호가 뭉개진 줄이 뒤늦게 집을 때만 가짜다.
+        """
+        from book2md import audit
+        tmp = Path(tempfile.mkdtemp())
+        (tmp / "기본서").mkdir()
+        (tmp / "기본서" / "96_097재소금지.md").write_text("""---
+source: 기본서
+chapter: "097 재소금지원칙"
+outline: ["의의", "요건", "효과"]
+parser: pymupdf
+---
+
+### 097 재소금지원칙
+
+==& 의의 - 요건 - 효과==
+
+#### I. 의의
+
+#### III. 요건-당사자가 동일할 것
+
+#### IV. 요건-소송물이 동일할 것
+
+#### ⑵ 요건
+
+#### V. 효과
+""", encoding="utf-8")
+        try:
+            k = audit.classify(audit.scan(tmp, CFG))
+            self.assertEqual([x.title for x in k["목차_두_번_씀"]], ["⑵ 요건"])
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+
+    def test_띠가_없으면_판정하지_않는다(self):
+        """띠가 근거다. 없으면 'I. 의의 및 취지'(77곳)가 머리말로 걸린다."""
+        from book2md import audit
+        tmp = Path(tempfile.mkdtemp())
+        (tmp / "기본서").mkdir()
+        for n in (1, 2, 3, 4):
+            (tmp / "기본서" / f"{n}_10{n}논점.md").write_text(f"""---
+source: 기본서
+chapter: "10{n} 논점"
+parser: pymupdf
+---
+
+### 10{n} 논점
+
+#### I. 의의 및 취지
+
+#### II. 내용
+""", encoding="utf-8")
+        try:
+            k = audit.classify(audit.scan(tmp, CFG))
+            self.assertEqual(k["머리말로_보임"], [])
+            self.assertEqual(len(k["띠가_없어_판정보류"]), 8)
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+
     def test_먼저_선_절은_가짜로_보지_않는다(self):
         self.assertNotIn("I. 의의 및 취지", self._titles("목차_두_번_씀"))
         self.assertNotIn("II. 내용", self._titles("목차_두_번_씀"))
@@ -1714,9 +1781,7 @@ parser: pymupdf
 """, encoding="utf-8")
         try:
             k = self.audit.classify(self.audit.scan(clean, CFG))
-            self.assertEqual({name: len(v) for name, v in k.items()},
-                             {"목차_두_번_씀": 0, "머리말로_보임": 0, "잡글자_섞임": 0,
-                              "목차에_없음": 0, "목차에_있는데_절이_없음": 0})
+            self.assertEqual({name: len(v) for name, v in k.items() if v}, {})
         finally:
             shutil.rmtree(clean, ignore_errors=True)
 

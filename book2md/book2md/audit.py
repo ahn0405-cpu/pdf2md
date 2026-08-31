@@ -25,6 +25,10 @@ _BAND_SEP = re.compile(r"\s*[-–—>»/·+]\s*")
 _JUNK_CHAR = re.compile(
     r"[^0-9A-Za-z가-힣㐀-鿿·\s.,()\[\]{}『』「」·•‧∙・\-–—~/:;'\"%\^\*=`_+]")
 _DASH_RUN = re.compile(r"[-–—_=]{4,}")
+#: 알아볼 수 있는 절 번호. 이런 번호가 붙어 있으면 목차 띠 없이도 절이다.
+_NUMBERED = re.compile(r"^\s*(?:[ⅠⅡⅢⅣⅤⅥⅦⅧⅨⅩ]|[IVXivx]{1,5}|\d{1,3})\s*[.,·•‧∙・)\]]")
+#: 목차 띠가 그대로 절 제목이 된 것. '◎ 의의-내용'
+_BAND_HEAD = re.compile(r"^\s*[&◎@※＆⊙○●]\s*\S")
 
 
 def _key(text: str) -> str:
@@ -44,6 +48,24 @@ class Sec:
         self.key = _key(title)
         self.matched: str | None = None     # 짝지은 목차 항목
         self.dup = False                    # 그 항목을 이미 다른 절이 썼다
+
+    @property
+    def numbered(self) -> bool:
+        """번호가 알아볼 수 있는 꼴인가.
+
+        번호가 성한 절은 목차 띠 없이도 절이다. 목차 항목을 여러 절이 나눠
+        가지는 것도 정상이다 — '요건-당사자 동일', '요건-소송물 동일'.
+        가짜를 만드는 것은 **번호가 뭉개진 줄**이다.
+        """
+        return bool(_NUMBERED.match(self.title))
+
+    @property
+    def is_band(self) -> bool:
+        """목차 띠 자체가 절 제목이 된 것인가. '◎ 의의-내용'"""
+        if not _BAND_HEAD.match(self.title):
+            return False
+        items = [x for x in _BAND_SEP.split(_BAND_HEAD.sub("", self.title)) if x.strip()]
+        return len(items) >= 2
 
     @property
     def junk(self) -> str:
@@ -163,11 +185,20 @@ def classify(data: dict, repeat_min: int = 3, book_words=()) -> dict:
     """가짜 절 후보를 유형별로 가른다. **고치지 않는다. 세기만 한다.**"""
     secs, repeat, bands = data["sections"], data["repeat"], data["bands"]
     words = tuple(w for w in book_words if w)
-    out: dict = {"목차_두_번_씀": [], "머리말로_보임": [], "잡글자_섞임": [],
-                 "목차에_없음": [], "목차에_있는데_절이_없음": []}
+    out: dict = {"목차_띠가_절이_됨": [], "목차_두_번_씀": [], "머리말로_보임": [],
+                 "잡글자_섞임": [], "목차에_없음": [], "띠가_없어_판정보류": [],
+                 "목차에_있는데_절이_없음": []}
     for s in secs:
-        if s.dup:
+        if s.is_band:
+            out["목차_띠가_절이_됨"].append(s)
+            continue
+        # 목차 항목을 여러 절이 나눠 가지는 것은 정상이다 —
+        # '요건-당사자 동일', '요건-소송물 동일', '요건-권리보호이익'.
+        # 번호가 뭉개진 줄이 뒤늦게 같은 항목을 집을 때만 가짜다.
+        if s.dup and not s.numbered:
             out["목차_두_번_씀"].append(s)
+            continue
+        if s.dup:
             continue
         if s.matched is not None:
             if s.junk:
@@ -177,7 +208,12 @@ def classify(data: dict, repeat_min: int = 3, book_words=()) -> dict:
         # 앞 글자가 겹치는 항목이 있으면 머리말일 리가 없다. 이 순서를
         # 뒤집으면 '고유필수적 공동소승인 추개■…' 이 머리말로 분류된다.
         band = bands.get(s.file) or []
-        near = _near(band[s.band], s.key) if 0 <= s.band < len(band) else None
+        if not (0 <= s.band < len(band)):
+            # 목차 띠를 못 읽은 자리다. 근거가 없으니 판정하지 않는다.
+            # 여기서 반복만 세면 'I. 의의 및 취지'(77곳) 가 머리말이 된다.
+            out["띠가_없어_판정보류"].append(s)
+            continue
+        near = _near(band[s.band], s.key)
         if near:
             out["잡글자_섞임"].append(s)
             continue
@@ -207,20 +243,30 @@ def report(data: dict, kinds: dict, limit: int = 200) -> str:
     total = len(data["sections"])
     L = ["# 절 제목 전수 점검", "",
          f"기본서 md {len(data['files'])}개 · 절 제목 {total}개", "",
-         "고치지 않았다. 무엇을 고칠지 정하기 전에 세기만 한 것이다.", "",
-         "## 유형별 건수", "", "| 유형 | 건수 | 뜻 |", "|---|---:|---|"]
+         "고치지 않았다. 무엇을 고칠지 정하기 전에 세기만 한 것이다.", ""]
+    banded = sum(1 for f in data["files"] if data["bands"].get(f))
+    no_band = sum(1 for s in data["sections"]
+                  if not (0 <= s.band < len(data["bands"].get(s.file) or [])))
+    L += [f"목차 띠를 읽은 파일 {banded}/{len(data['files'])}개 · "
+          f"띠에 못 붙은 절 {no_band}/{total}개", "",
+          "띠가 판정의 근거다. 띠가 없으면 무엇이 가짜인지 정할 수 없어 "
+          "「띠가 없어 판정보류」로 뺀다.", "",
+          "## 유형별 건수", "", "| 유형 | 건수 | 뜻 |", "|---|---:|---|"]
     tips = {
-        "목차_두_번_씀": "같은 목차 항목을 두 절이 나눠 가졌다. 뒤엣것이 가짜일 확률이 높다",
+        "목차_띠가_절이_됨": "'◎ 의의-내용' 이 절 제목이 됐다. 띠가 사라져 그 뒤 판정이 전부 어긋난다",
+        "목차_두_번_씀": "번호가 뭉개진 줄이 이미 쓰인 목차 항목을 또 집었다",
         "머리말로_보임": "목차에 없고 여러 논점에 되풀이된다. 러닝 헤더가 절 규칙에 걸린 것",
         "잡글자_섞임": "제목에 한글·한자가 아닌 글자가 섞였다. 진짜 절일 수 있다",
-        "목차에_없음": "목차 띠에 대응이 없다. 저자가 띠에 안 적었을 수도 있다",
+        "목차에_없음": "띠는 읽었는데 대응이 없다. 저자가 띠에 안 적었을 수도 있다",
+        "띠가_없어_판정보류": "그 자리에 띠가 없다. 근거가 없어 판정하지 않았다",
         "목차에_있는데_절이_없음": "띠에 있는데 절이 안 섰다. 그 절이 문단에 묻혔다",
     }
     for k, tip in tips.items():
         L.append(f"| {k.replace('_', ' ')} | {len(kinds[k])} | {tip} |")
     L.append("")
 
-    for k in ("목차_두_번_씀", "머리말로_보임", "잡글자_섞임", "목차에_없음"):
+    for k in ("목차_띠가_절이_됨", "목차_두_번_씀", "머리말로_보임",
+              "잡글자_섞임", "목차에_없음", "띠가_없어_판정보류"):
         items = kinds[k]
         L += [f"## {k.replace('_', ' ')} — {len(items)}건", ""]
         if not items:
