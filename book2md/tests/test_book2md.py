@@ -1668,6 +1668,72 @@ parser: pymupdf
         """'I. 의의 및 취지' 가 이미 '의의' 를 썼다. '(D 의의' 는 그 다음이다."""
         self.assertEqual(self._titles("목차_두_번_씀"), ["(D 의의"])
 
+    def test_띠는_축약형_절은_완전형이라_유사도로_짝짓는다(self):
+        """완전 일치로 대조하면 진짜 절이 '짝 없음' 으로 나온다 (실측 20건 중 절반)."""
+        from book2md.audit import similar, _key as k
+        for 띠, 절 in [("협의소송자료", "III. 협의의 소송자료 준별과 완화"),
+                      ("본안신청", "I. 본안의 신청"),
+                      ("사해행위 법적평가", "IV. 사해행위의 법률적 평가를 달리 주장"),
+                      ("효과", "III. 효고b")]:
+            self.assertTrue(similar(k(띠), k(절)), f"{띠} ↔ {절}")
+        # 아무거나 걸리면 안 된다
+        self.assertFalse(similar(k("의의"), k("II. 소송물")))
+        self.assertFalse(similar(k("기판력"), k("III. 중복소제기")))
+
+    def test_긴_목차_항목부터_짝짓는다(self):
+        """'부진정 예비적 병합' 이 있는데 '예비적 병합' 이 먼저 걸리면 안 된다."""
+        from book2md import audit
+        tmp = Path(tempfile.mkdtemp())
+        (tmp / "기본서").mkdir()
+        (tmp / "기본서" / "09_112객관적병합.md").write_text("""---
+source: 기본서
+chapter: "112 객관적병합"
+outline: ["예비적 병합", "부진정 예비적 병합"]
+parser: pymupdf
+---
+
+### 112 객관적병합
+
+==& 예비적 병합 - 부진정 예비적 병합==
+
+#### V. 예비적 병합
+
+#### VI. 부진정 예비적 병합
+""", encoding="utf-8")
+        try:
+            data = audit.scan(tmp, CFG)
+            got = {s.title: s.matched for s in data["sections"]}
+            self.assertEqual(got["VI. 부진정 예비적 병합"], "부진정 예비적 병합")
+            self.assertEqual(got["V. 예비적 병합"], "예비적 병합")
+            self.assertEqual(audit.classify(data)["목차_두_번_씀"], [])
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+
+    def test_책_제목이_들어_있으면_띠와_무관하게_머리말이다(self):
+        """진짜 러닝 헤더 두 건은 띠를 못 읽은 파일에 있었다."""
+        from book2md import audit
+        tmp = Path(tempfile.mkdtemp())
+        (tmp / "기본서").mkdir()
+        (tmp / "기본서" / "01_034대위소.md").write_text("""---
+source: 기본서
+chapter: "034 대위소"
+parser: pymupdf
+---
+
+### 034 대위소
+
+#### I. 의의
+
+#### VIII • 윤곽 민사소송법
+""", encoding="utf-8")
+        try:
+            k = audit.classify(audit.scan(tmp, CFG), book_words=["윤곽 민사소송법"])
+            self.assertEqual([x.title for x in k["머리말로_보임"]],
+                             ["VIII • 윤곽 민사소송법"])
+            self.assertEqual([x.title for x in k["띠가_없어_판정보류"]], ["I. 의의"])
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+
     def test_목차_띠가_절_제목이_된_것을_잡는다(self):
         """'◎ 의의-내용' 이 절이 되면 띠가 사라져 그 뒤 판정이 전부 어긋난다."""
         self.assertEqual(self._titles("목차_띠가_절이_됨"), ["◎ 의의-내용"])

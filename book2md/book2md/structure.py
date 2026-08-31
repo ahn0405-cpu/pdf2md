@@ -87,8 +87,13 @@ class Structurer:
         self._side_tol = float(legend["sidenote"].get("match_tolerance", 12))
 
         self._outline_names: list[str] = []
+        #: 이미 다른 절이 집어 간 목차 항목. 번호가 뭉개진 줄이 뒤늦게 같은
+        #: 항목을 다시 집으면 가짜 절이 생긴다 (실측 '(D 의의').
+        self._outline_taken: set = set()
         self._outline_use = bool(prof.get("outline_heading", True))
         self._outline_junk = int(prof.get("outline_junk_max", 4))
+        self._band_lead = (cfg.get("legend", {}).get("outline", {})
+                           .get("lead_marker"))
         self._outline_tail = int(prof.get("outline_tail_max", 12))
         self._heads = [(h["level"], re.compile(h["pattern"]))
                        for h in prof.get("headings", [])]
@@ -173,6 +178,9 @@ class Structurer:
                 self._last_item = 0
                 if level <= 3:
                     self._outline_names = []     # 논점이 바뀌면 목차도 바뀐다
+                    self._outline_taken = set()
+                elif level >= 4:
+                    self._claim_outline(plain)
                 return
         items = self._outline_items(plain)
         if items:
@@ -180,11 +188,13 @@ class Structurer:
             # 이 논점의 절 이름을 기억해 둔다. 번호 자리가 뭉개진 제목을
             # 되찾는 유일한 근거다 (아래 _outline_head).
             self._outline_names = [t for t in items if len(t) >= 2]
+            self._outline_taken = set()
             self.blocks.append(self._mk("para", text, page=page_no,
                                         meta={"outline": items}))
             return
         name = self._outline_head(plain)
         if name:
+            self._outline_taken.add(name)
             self._heading(4, plain, page_no, y=getattr(line, "y0", None))
             self._in_roman = True
             self._last_item = 0
@@ -321,13 +331,30 @@ class Structurer:
             return None
         if _KNOWN_NUM.match(junk):
             return None      # '1.', '(2)', 'IV.' 는 기존 규칙이 맡는다
+        if self._band_lead and re.search(self._band_lead, junk):
+            return None      # '◎ 의의-내용' 은 목차 띠다. 절 제목이 아니다.
         for name in self._outline_names:
+            if name in self._outline_taken:
+                # 이 항목은 앞의 절이 이미 집었다. 목차 띠는 절마다 하나씩
+                # 적은 것이라, 번호가 뭉개진 줄이 다시 집으면 가짜다.
+                continue
             if not rest.startswith(name):
                 continue
             tail = rest[len(name):].strip()
             if len(tail) <= self._outline_tail:
                 return name
         return None
+
+    def _claim_outline(self, plain: str) -> None:
+        """번호가 성한 절이 목차 항목을 집는다. 뒤에 오는 복구를 막기 위해서다.
+
+        한 항목을 여러 절이 나눠 쓰는 것은 정상이다 — 실측 097 재소금지원칙은
+        '요건' 하나를 '요건-당사자 동일' '요건-소송물 동일' 셋이 나눈다.
+        번호가 성한 절끼리는 서로 막지 않고, 복구 규칙만 막는다.
+        """
+        for name in self._outline_names:
+            if name and name in plain:
+                self._outline_taken.add(name)
 
     def _runin(self, text: str, plain: str):
         """'==I. 의의 및 취지== 당사자와 …' 을 (제목, 나머지) 로 가른다.
@@ -446,10 +473,17 @@ class Structurer:
         if len(body) > 60 or _SENT_END.search(body):
             return []
         lead = self._outline.get("lead_marker")
+        marked = False
         if lead:
-            body = re.sub(lead, "", body)
+            body, n = re.subn(lead, "", body)
+            marked = bool(n) and body != text.strip()
         items = [t.strip() for t in re.split(self._outline["separator"], body) if t.strip()]
-        if len(items) < int(self._outline["min_items"]):
+        # 표지(◎ & ※)가 붙어 있으면 토막이 둘뿐이어도 띠다. 실측
+        # '◎ 의의-내용' 이 셋이 아니라는 이유로 띠가 아니게 되어, 절 제목으로
+        # 승격되고 그 논점의 목차가 통째로 사라졌다.
+        least = int(self._outline.get("min_items_marked", 2) if marked
+                    else self._outline["min_items"])
+        if len(items) < least:
             return []
         if any(len(t) > int(self._outline.get("max_item_len", 10)) for t in items):
             return []

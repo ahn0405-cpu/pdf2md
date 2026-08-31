@@ -13,6 +13,7 @@ import re
 from collections import Counter
 from pathlib import Path
 
+from .crosscheck import _distance
 from .model import is_generated
 
 _FM = re.compile(r"^---\n(?P<body>.*?)\n---\n", re.S)
@@ -29,6 +30,42 @@ _DASH_RUN = re.compile(r"[-–—_=]{4,}")
 _NUMBERED = re.compile(r"^\s*(?:[ⅠⅡⅢⅣⅤⅥⅦⅧⅨⅩ]|[IVXivx]{1,5}|\d{1,3})\s*[.,·•‧∙・)\]]")
 #: 목차 띠가 그대로 절 제목이 된 것. '◎ 의의-내용'
 _BAND_HEAD = re.compile(r"^\s*[&◎@※＆⊙○●]\s*\S")
+
+
+def similar(band_key: str, sec_key: str) -> bool:
+    """목차 띠 항목과 절 제목이 같은 것을 가리키는가.
+
+    완전 일치나 부분 문자열로는 못 만난다. 띠는 축약형이고 절은 완전형이다.
+
+        띠 '협의소송자료'   ↔ 절 '협의의 소송자료 준별과 완화'
+        띠 '본안신청'       ↔ 절 '본안의 신청'
+        띠 '사해행위 법적평가' ↔ 절 '사해행위의 법률적 평가를 달리 주장'
+
+    앞 글자를 맞춘 채 띠의 글자가 절 안에 **순서대로** 나오고, 그 구간이
+    지나치게 벌어지지 않으면 같은 것으로 본다. 세 글자 이하는 순서만 보면
+    아무 데나 걸리므로('의의' 가 '소송물의 의미' 에) 한 글자 차이까지만 본다.
+    """
+    if not band_key or not sec_key:
+        return False
+    if band_key in sec_key:
+        return True
+    # 띠가 절보다 길 때의 포함은 조금만 인정한다. '부진정 예비적 병합' 이
+    # 'V. 예비적 병합' 까지 삼키면 진짜 절이 짝을 잃고 가짜로 몰린다.
+    if sec_key in band_key and len(band_key) - len(sec_key) <= 2:
+        return True
+    if len(band_key) <= 3:
+        head = sec_key[:len(band_key)]
+        return bool(head) and _distance(band_key, head) <= 1
+    if sec_key[0] != band_key[0]:
+        return False
+    j, last = 0, -1
+    for ch in band_key:
+        j = sec_key.find(ch, j)
+        if j < 0:
+            return False
+        last = j
+        j += 1
+    return last + 1 <= len(band_key) * 2
 
 
 def _key(text: str) -> str:
@@ -147,10 +184,13 @@ def scan(root, cfg: dict, sec_level: int = 4) -> dict:
             continue
         items = all_bands[path][bi]
         taken: dict = {}
+        # 긴 항목부터 본다. '부진정 예비적 병합' 이 있는데 '예비적 병합' 이
+        # 먼저 걸리면 짝이 어긋나고, 뒤엣것이 가짜로 몰린다.
+        ordered = sorted(items, key=lambda n: -len(_key(n)))
         for s in secs:
-            for name in items:
+            for name in ordered:
                 k = _key(name)
-                if not k or k not in s.key:
+                if not k or not similar(k, s.key):
                     continue
                 s.matched = name
                 if k in taken:
@@ -207,6 +247,12 @@ def classify(data: dict, repeat_min: int = 3, book_words=()) -> dict:
         # 목차에 대응이 없는 절. 먼저 **깨진 진짜 절**인지 본다 — 목차 띠에
         # 앞 글자가 겹치는 항목이 있으면 머리말일 리가 없다. 이 순서를
         # 뒤집으면 '고유필수적 공동소승인 추개■…' 이 머리말로 분류된다.
+        # 책 제목이 들어 있으면 띠와 무관하게 머리말이다. 실측
+        # 'VIII • 윤곽 민사소송법' 은 띠를 못 읽은 파일에 있어서, 띠 검사를
+        # 먼저 하면 진짜 두 건이 판정보류로 새어 나간다.
+        if any(w and w in s.title for w in words):
+            out["머리말로_보임"].append(s)
+            continue
         band = bands.get(s.file) or []
         if not (0 <= s.band < len(band)):
             # 목차 띠를 못 읽은 자리다. 근거가 없으니 판정하지 않는다.
@@ -220,7 +266,7 @@ def classify(data: dict, repeat_min: int = 3, book_words=()) -> dict:
         # 여러 논점에 되풀이되면 머리말이 절 규칙에 걸린 것이다. 반복만
         # 세면 안 된다 — 'I. 의의' 도 논점마다 나온다. 목차에 없다는
         # 조건이 함께 걸려야 걸러진다.
-        if repeat[s.key] >= repeat_min or any(w and w in s.title for w in words):
+        if repeat[s.key] >= repeat_min:
             out["머리말로_보임"].append(s)
         elif s.junk:
             out["잡글자_섞임"].append(s)
