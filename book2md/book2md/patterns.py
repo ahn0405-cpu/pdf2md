@@ -114,8 +114,21 @@ class Patterns:
         mnemonic_article = re.compile(
             mn.get("article_pattern", r"^제?\s*\d+\s*조"))
         # 프론트매터 articles: 용. 본문에 인용된 조문을 그대로 모은다.
-        article_cite = re.compile(
-            r"제\s*\d+\s*조(?:의\s*\d+)?(?:\s*제?\s*\d+\s*[항호목])*")
+        #
+        # 한 법만 다루는 교재(민소법)는 법령명이 필요 없다. 특허법 교재처럼
+        # 특허법·실용신안법·디자인보호법이 한 쪽에 섞이면 '제29조' 만으로는
+        # 어느 법의 조문인지 정해지지 않는다. preserve.article.law_names 에
+        # 법령명을 적어 두면 조문 앞에 **붙어 있을 때만** 함께 싣는다.
+        # 앞 문단의 법령명을 이어 붙이지는 않는다 — 그건 원문에 없는 것을
+        # 지어내는 일이다(§4.8).
+        art_body = r"제\s*\d+\s*조(?:의\s*\d+)?(?:\s*제?\s*\d+\s*[항호목])*"
+        law_names = (pre.get("article") or {}).get("law_names") or []
+        if law_names:
+            # '구 특허법 제29조' 의 '구' 는 개정 전 법이라 조문 내용이 다르다.
+            article_cite = re.compile(
+                rf"(?P<law>(?:구\s*)?(?:{_alt(law_names)})\s*)?(?P<art>{art_body})")
+        else:
+            article_cite = re.compile(art_body)
 
         fn = pre["footnote"]
         lo, hi = fn["number_min"], fn["number_max"]
@@ -187,8 +200,14 @@ class Patterns:
         for m in self.article_cite.finditer(text):
             # '제 174조' 와 '제174조' 가 따로 실리면 뒤 AI 가 다른 조문으로 읽는다.
             # 조문 표기 안의 공백은 OCR 이 흘린 것이라 없앤다 (§P1-2).
-            cite = re.sub(r"\s+", "", m.group(0))
+            gd = m.groupdict()
+            cite = re.sub(r"\s+", "", gd.get("art") or m.group(0))
             cite = re.sub(r"(?<=[조항호목의])(?=제)", " ", cite)
+            law = gd.get("law")
+            if law:
+                law = re.sub(r"\s+", "", law)
+                law = re.sub(r"^구(?=.)", "구 ", law)
+                cite = f"{law} {cite}"
             if cite not in out:
                 out.append(cite)
         return out

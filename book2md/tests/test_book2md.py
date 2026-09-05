@@ -8,6 +8,7 @@
 """
 from __future__ import annotations
 
+import copy
 import shutil
 import sys
 import tempfile
@@ -877,6 +878,25 @@ class 수정요청_01(unittest.TestCase):
         self.assertTrue(PAT.is_mnemonic_body("일나시 나소시"))
         self.assertEqual(PAT.find_articles("제265조와 제218조 제1항"),
                          ["제265조", "제218조 제1항"])
+
+    def test_법령명은_적어_둔_교재에서만_함께_싣는다(self):
+        # 민소법 설정에는 law_names 가 없다. 지금까지대로 조문만 싣는다.
+        self.assertEqual(PAT.find_articles("특허법 제29조 제1항"), ["제29조 제1항"])
+
+        # 특허법 교재처럼 여러 법이 섞이면 조문 앞에 붙은 법령명을 함께 싣는다.
+        cfg = copy.deepcopy(CFG)
+        cfg["preserve"]["article"] = {
+            "law_names": ["특허법", "실용신안법", "디자인보호법"]}
+        pat = Patterns.build(cfg)
+        self.assertEqual(
+            pat.find_articles("특허법 제29조 제1항 제2호와 제42조 제4항"),
+            ["특허법 제29조 제1항 제2호", "제42조 제4항"])
+        self.assertEqual(pat.find_articles("실용신안법 제4조, 디자인보호법 제33조"),
+                         ["실용신안법 제4조", "디자인보호법 제33조"])
+        # 개정 전 법은 조문 내용이 다르다. '구' 를 떼지 않는다.
+        self.assertEqual(pat.find_articles("구 특허법 제29조"), ["구 특허법 제29조"])
+        # 앞 문단의 법령명을 이어 붙이지 않는다 (§4.8)
+        self.assertEqual(pat.find_articles("제29조"), ["제29조"])
 
     def test_조문번호_안의_죄를_조로(self):
         self.assertEqual(norm("제218죄 제1항"), "제218조 제1항")
