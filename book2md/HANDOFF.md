@@ -9,12 +9,18 @@
 ```
 config.yaml           공통 — 사건번호 문법, 각주·두문자 판정, 검증 기준
 config-민소법.yaml     교재별 — 사람이 확인한 정정, 책 제목, 그 판형의 오인식
-config-특허법.yaml     교재별  ← 새 교재는 이 파일 하나를 만든다
+config-patent.yaml    교재별  ← 새 교재는 이 파일 하나를 만든다
 ```
 
-**`config-patent.yaml` 은 이미 만들어 두었다.** 사건번호 부호(심판번호 당·원·
-취·정)·조문 법령명·띠 낱말을 특허법에 맞춰 놓고, 실물을 봐야 정해지는 다섯
-자리는 `TODO(진단)` 으로 표시했다.
+**`config-patent.yaml` 은 이미 만들어 두었다.** 민소법 설정에서 갈라내
+사건번호 부호(심판번호 당·원·취·정)·조문 법령명·띠 낱말을 특허법에 맞춰 놓았다.
+
+특허법 교재는 **기본서 + 사례집 두 권이고, 출판사가 민소법과 다르다.**
+그래서 판형에 매인 설정은 하나도 믿을 수 없다. 두 갈래로 나눠 두었다.
+
+- **중립화** — 민소법 판형에 맞춰 둔 것 중 **글자를 실제로 바꾸는** 규칙은
+  꺼 두었다. 끈 채로 돌려도 글자는 하나도 잃지 않는다. 구조가 덜 잡힐 뿐이다.
+- **`TODO(진단)`** — 실물을 봐야 정해지는 자리. 민소법 값이 그대로 남아 있다.
 
 ```bat
 convert --book patent diagnose "특허법 PDF 폴더" --out 특허출력
@@ -172,10 +178,29 @@ convert --config config.yaml --config config-patent.yaml diagnose …   :: 같�
   (`특허법 제29조 제1항`, `구 특허법 제42조 제4항`). 앞 문단의 법령명을
   이어 붙이지는 않는다 — 원문에 없는 것을 지어내지 않기 위해서다(§4.8).
   목록이 비면 지금까지대로 조문만 싣는다.
-- **사례집 유무**: 사례집이 없으면 [3] 매핑 단계 자체가 없다. 기본서만으로
-  노트를 만들면 「사건의 전말」이 각주와 `[예시 사안]` 으로 채워진다.
-- **논점 윤곽 띠**: 같은 출판사 판형이면 그대로 간다. 아니면 `legend.outline` 을
-  새 교재에 맞춰야 하고, 그게 이 파이프라인에서 제일 중요한 설정이다.
+나머지 둘은 확인됐고, 둘 다 손이 더 간다는 뜻이다.
+
+- **사례집이 있다.** [3] 매핑 단계를 그대로 쓴다. 다만 사례집 문제 번호
+  모양(`profiles.casebook.problem`)이 민소법의 `E-2.` 꼴일 근거가 없다.
+  **안 맞으면 문제가 하나도 안 잡힌다.** 사례집에서 제일 먼저 볼 자리다.
+- **출판사가 다르다.** 논점 윤곽 띠가 **있는 교재인지부터** 확인해야 한다.
+  띠가 없으면 뭉개진 절 제목을 되찾을 근거가 통째로 사라지고, 절 점검
+  (`audit-sections`)도 다른 방식으로 해야 한다.
+
+### 다른 출판사라서 꺼 둔 것 — 글자를 바꾸는 규칙들
+
+민소법 설정에는 그 교재의 OCR 을 실측해 만든 규칙이 섞여 있다. 근거가 그
+교재에만 있으므로 옮겨 쓰면 **없는 것을 지어낸다.** `config-patent.yaml`
+에서 「중립화」로 표시하고 꺼 두었다.
+
+| 꺼 둔 것 | 켜 두면 무슨 일이 나나 |
+|---|---|
+| `legend.bonus.misread` / `misread_ascii` | 오인식 글자 하나가 줄 맨 앞에 오면 그 줄부터 **뒤 24줄까지** 인용 박스로 삼켜진다. 목록에 `느` 가 있어서 '느슨한…' 으로 시작하는 본문 한 줄이면 그 일이 난다 |
+| `profiles.textbook.headings` 의 세 자리 논점번호 | 세 자리 숫자로 시작하는 아무 줄이나 논점 제목이 된다 |
+| `profiles.textbook.split_prefer` | 위와 짝이다. 함께 되살린다 |
+| `profiles.textbook.roman_heads_extra: {II: [H]}` | 'H' 로 시작하는 줄이 로마자 절 제목으로 둔갑한다 |
+
+되살리는 순서는 늘 같다 — **실물에 그 요소가 있는지 보고 → 세고 → 켠다.**
 
 ## 새 세션 첫 명령
 
@@ -199,17 +224,27 @@ convert --config config-patent.yaml diagnose "특허법 PDF 폴더" --out 특허
 | `running.never_heading` | 진단의 머리말·꼬리말 표본. **책 제목**을 적는다 |
 | `legend.outline` | 논점 첫 줄에 띠가 있는지. 없으면 이 파이프라인의 절 복구가 통째로 다르게 간다 |
 | `legend.sidenote.pattern` | `probe --lines` 로 우측 여백 번호 모양 |
-| `profiles.textbook.headings` | 절 번호 모양. 논점에 세 자리 번호가 붙는지 |
+| `legend.bonus` | 보너스 박스가 있는지. 있으면 표지가 어떻게 흘러나오는지 세어 목록을 새로 만든다 |
+| `legend.exam_year` / `case_label` | 기출연도·판례 라벨 표기 |
+| `profiles.textbook.headings` | 절 번호 모양. 논점에 번호가 붙는지 |
 | `profiles.textbook.split_prefer` | 장 나누기 경계 |
+| `profiles.casebook.problem` | **사례집 문제 번호 모양. 안 맞으면 문제가 하나도 안 잡힌다** |
 
 그다음은 민소법 때와 같은 순서다 — **하나 먼저 → 검증 → 규칙 보완 → 전체.**
 
 ```bat
+REM 줄마다 무엇으로 읽혔는지 — 띠·옆번호·번호 모양을 여기서 본다
+convert --config config-patent.yaml probe "특허법 기본서.pdf" --lines --pages 40-60
+convert --config config-patent.yaml probe "특허법 사례집.pdf" --lines --pages 20-40
+
 REM 한 장만 시험 변환
 convert --config config-patent.yaml run "특허법 기본서.pdf" --pages 120-145 --profile textbook --out 특허출력\기본서
 REM 절 제목 전수 점검 — 맨 윗줄 「목차 띠를 읽은 파일 N/M개」를 가장 먼저 본다
 convert --config config-patent.yaml audit-sections 특허출력 --out audit.md
 ```
+
+사례집은 상·하로 나뉘어 있으면 **출력 폴더를 나눈다.** 같은 폴더에 쏟으면
+문제 그룹 파일 이름이 겹친다 (README 참조).
 
 ## 함께 읽을 문서
 
