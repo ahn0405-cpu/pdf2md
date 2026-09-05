@@ -18,6 +18,42 @@ from dataclasses import dataclass
 from .model import Page
 from .patterns import Patterns
 
+#: 줄 맨 앞의 로마자 절 번호. 앞에 강조 표시가 붙어 있을 수 있다.
+#: 뒤에는 '.'(또는 공백)과 한글 제목이 와야 한다.
+def _roman_head_rx(table: dict, head_seps=None):
+    """줄 맨 앞의 로마자 절 번호를 잡는 정규식.
+
+    글자 목록은 config 의 roman_heads 에서 그대로 뽑는다. 표에 새 오인식을
+    적어 넣었는데 정규식이 못 받으면 아무 일도 안 일어난다 — 둘이 어긋나는
+    것이 이 자리에서 가장 흔한 사고다.
+    """
+    chars = set("IVX")
+    for raw in table:
+        chars.update(raw)
+    # 구분점은 번호에 들어갈 수 없다. 표에 'IV.' 같은 것이 섞여 있으면 '.' 이
+    # 번호 글자로 새어 들어가 '।.' 을 통째로 번호로 삼고 표에서 못 찾는다.
+    chars -= set(".,·  \t")
+    cls = "".join(sorted(chars))
+    seps = re.escape("".join(sorted(set(head_seps or ".,·"))))
+    num = (rf"(?P<num>[{re.escape(cls)}]{{1,5}})"
+           rf"(?:\s*(?P<sep>[{seps}])\s*|\s+)(?=[가-힣])")
+    head = re.compile(rf"^(?:[=*]{{2}})?\s*{num}")
+    # 앞 문단 끝에 붙어 버린 제목: '…위함이다.[^73] ==H . 사유== i) 제34조…'
+    # 문장이 끝난 자리 + 강조 여는 표시 바로 뒤일 때만 본다.
+    inline = re.compile(rf"(?:[.?!\]\)])\s*(?:==|\*\*)\s*{num}")
+    return head, inline
+
+#: 제N죄/제N좌 → 제N조 (조문번호 안에서만)
+_ARTICLE_OCR = re.compile(r"제\s*(\d+)\s*[죄좌](?![가-힣])")
+
+#: 'III.중복소제기' 처럼 번호 뒤 공백을 OCR 이 삼킨 것. 종이에는 있다.
+#: 줄 맨 앞 + 번호 + 구분점 + 한글일 때만 넣는다.
+_HEAD_SPACE = re.compile(
+    r"^((?:[=*]{2})?\s*(?:[IVX]{1,5}|\d{1,2})\s*[.)])(?=[가-힣])")
+
+#: '1 .문제점' 처럼 번호와 마침표 사이가 벌어진 것. 줄 앞에서만 고친다.
+_ITEM_SPACE = re.compile(r"^(\s*(?:[=*]{2})?\s*[0-9IVXivx]{1,4})\s+([.)])")
+
 _FULLWIDTH = {c: chr(ord(c) - 0xFEE0) for c in
               [chr(x) for x in range(0xFF01, 0xFF5F)]}
 _FULLWIDTH["　"] = " "
@@ -34,7 +70,7 @@ class Change:
 
 
 class Normalizer:
-    def __init__(self, cfg: dict, pat: Patterns):
+    def __init__(self, cfg: dict, pat: Patterns, prof: dict | None = None):
         self.cfg = cfg
         self.pat = pat
         n = cfg["normalize"]
@@ -42,20 +78,47 @@ class Normalizer:
         self.closes = set(n["close_brackets"])
         self.fullwidth_brackets = bool(n.get("fullwidth_brackets", True))
         self.fullwidth_alnum = bool(n.get("fullwidth_alnum", True))
+        self.fullwidth_parens = bool(n.get("fullwidth_parens", True))
         self.mnemonic_pairs = [tuple(p) for p in n.get("mnemonic_brackets", [])]
+        self.repair_unclosed = bool(
+            cfg["preserve"]["mnemonic"].get("repair_unclosed", True))
         self.noise_chars = sorted(n.get("noise_chars", []), key=len, reverse=True)
         self.noise_tokens = set(n.get("noise_tokens", []))
         self.collapse = bool(n.get("collapse_spaces", True))
         self.fix_dates = bool(n.get("fix_dates", True))
+        self.item_space = bool(n.get("item_number_space", True))
+        self.head_space = bool(n.get("heading_number_space", True))
+        # 프로파일마다 다른 오인식이 있다. 기본서에서는 'H' 가 II 지만,
+        # 사례집은 문제 묶음을 A~Q 글자로 세므로 그러면 장 제목이 깨진다.
+        heads = dict(n.get("roman_heads", {}))
+        for num, extra in ((prof or {}).get("roman_heads_extra", {}) or {}).items():
+            heads[num] = list(heads.get(num, [])) + list(extra)
+        self.head_seps = n.get("head_seps", [".", ",", "·"])
+        self.roman = _roman_table(heads)
+        self.roman_rx, self.roman_inline_rx = _roman_head_rx(
+            self.roman, self.head_seps)
+        self.article_ocr = bool(n.get("article_ocr", True))
+        self.title_brackets = bool(n.get("repair_title_brackets", True))
+        self.close_alt = "".join(c for c in self.closes if c not in "])}")
+        self.case_sep = _case_sep_rx(cfg, n.get("case_inner_seps", []))
         self.date_hangul = n.get("date_trailing_hangul", "warn")
         self.stars = "".join(cfg["preserve"]["star"]["chars"])
         self.allowed = _allowed_set(cfg.get("noise_scan", {}))
+        self.corrections = [
+            (c["find"], c.get("to", ""), c.get("note", ""))
+            for c in (cfg.get("corrections") or []) if c.get("find")
+        ]
 
     # ── 페이지 단위 ──────────────────────────────────────────────
     def normalize_page(self, page: Page) -> list[Change]:
         changes: list[Change] = []
         for line in page.lines:
+            before = line.text
             line.text = self.normalize_line(line.text, page.number, changes)
+            if before.strip() and not line.text.strip():
+                # 노이즈만으로 이루어진 줄이었다. 통째로 사라지므로 남긴다 (§P2-1)
+                changes.append(Change(page.number, "drop", before.strip(), "",
+                                      "정규화 뒤 빈 줄이 되어 버렸다"))
         page.lines = [l for l in page.lines if l.text.strip()]
         return changes
 
@@ -67,11 +130,31 @@ class Normalizer:
             text = text.replace("　", " ")
         if self.fullwidth_brackets:
             text = text.replace("［", "[").replace("］", "]")
+        if self.fullwidth_parens:
+            text = text.replace("（", "(").replace("）", ")")
 
+        text = self._corrections(text, page_no, changes)
         text = self._mnemonic_brackets(text, page_no, changes)
+        text = self._title_brackets(text, page_no, changes)
         text = self._noise(text, page_no, changes)
+        text = self._case_seps(text, page_no, changes)
         text = self._cases(text, page_no, changes)
+        # 정정을 한 번 더 돌린다. 원문에 '201다 84298' 처럼 공백이 끼어 있으면
+        # 앞의 정정이 못 만난다 — 그 공백은 방금 _cases 가 없앴다. 정정은
+        # 글자열 치환이라 두 번 돌아도 같은 자리를 두 번 고치지 않는다.
+        text = self._corrections(text, page_no, changes)
+        text = self._roman_head(text, page_no, changes)
         text = self._articles(text)
+        if self.article_ocr:
+            text = _ARTICLE_OCR.sub(lambda m: f"제{m.group(1)}조", text)
+        if self.item_space:
+            text = _ITEM_SPACE.sub(r"\1\2", text)
+        if self.head_space:
+            fixed = _HEAD_SPACE.sub(r"\1 ", text)
+            if fixed != text:
+                changes.append(Change(page_no, "space", text, fixed,
+                                      "번호 뒤 공백 복원"))
+                text = fixed
         if self.fix_dates:
             text = self._dates(text, page_no, changes)
         if self.collapse:
@@ -79,26 +162,108 @@ class Normalizer:
 
         return text
 
+    # ── 사람이 확정한 정정 ───────────────────────────────────────
+    def _corrections(self, text: str, page_no: int, changes: list[Change]) -> str:
+        """config.yaml 의 corrections 만 적용한다. 스스로 고치지 않는다.
+
+        OCR 이 글자를 삼켜 버려 프로그램이 되살릴 수 없는 것들이 있다.
+        무엇으로 되돌릴지는 원문을 본 사람만 안다.
+        """
+        for find, to, note in self.corrections:
+            idx = text.find(find)
+            while idx >= 0:
+                changes.append(Change(page_no, "correction", find, to,
+                                      _ctx(text, idx, idx + len(find)) +
+                                      (f"  ({note})" if note else "")))
+                text = text[:idx] + to + text[idx + len(find):]
+                idx = text.find(find, idx + len(to))
+        return text
+
     # ── 두문자 대괄호 복구 (§2.2) ─────────────────────────────────
     def _mnemonic_brackets(self, text: str, page_no: int, changes: list[Change]) -> str:
-        pairs = {a: b for a, b in self.mnemonic_pairs}
+        """괄호만 되돌린다. 안쪽 글자는 손대지 않는다.
 
+        OCR 은 여는 괄호와 닫는 괄호를 서로 다른 글자로 흘린다(`［…】`, `【…］`,
+        `｛…】`). 짝이 안 맞아도 안쪽이 두문자 모양이면 대괄호로 되돌린다.
+        닫는 괄호를 통째로 흘린 경우(`(1) 원칙 ［일나시 나소시`)도 되살린다.
+        되살린 자리는 모두 기록에 남겨 사람이 확인할 수 있게 한다.
+        """
         def repl(m: re.Match) -> str:
             body = m.group("body")
-            o, c = m.group("open"), m.group("close")
-            if o == "[" and c == "]":
-                return m.group(0)
-            if pairs.get(o) != c:
+            mid = m.groupdict().get("mid") or ""
+            if m.group("open") == "[" and m.group("close") == "]" and not mid:
                 return m.group(0)
             if not self.pat.is_mnemonic_body(body):
                 return m.group(0)
-            changes.append(Change(page_no, "mnemonic", m.group(0), f"[{body}]",
+            fixed = f"[{body}]{mid}"
+            changes.append(Change(page_no, "mnemonic", m.group(0), fixed,
                                   _ctx(text, m.start(), m.end())))
-            return f"[{body}]"
+            return fixed
 
-        return self.pat.mnemonic_like.sub(repl, text)
+        text = self.pat.mnemonic_like.sub(repl, text)
+        if self.repair_unclosed:
+            m = self.pat.mnemonic_unclosed.search(text)
+            if m and self.pat.is_mnemonic_body(m.group("body")):
+                tail = m.group("tail") or ""
+                fixed = text[:m.start()] + f"[{m.group('body')}]" + tail
+                changes.append(Change(page_no, "mnemonic", m.group(0),
+                                      f"[{m.group('body')}]" + tail,
+                                      _ctx(text, m.start(), m.end())))
+                text = fixed
+        return text
+
+    # ── 제목·각주의 대괄호 오인식 (§P2-2) ─────────────────────────
+    def _title_brackets(self, text: str, page_no: int, changes: list[Change]) -> str:
+        """두문자가 아닌 긴 제목의 대괄호를 되돌린다.
+
+        'E-2. 」명시적 일부청구 중복소제기]' 는 여는 대괄호가 닫는 괄호 글자로
+        흘러나온 것이다. 안쪽이 두문자가 아니라 두문자 복구가 못 잡는다.
+        **한 줄 안에서 짝이 맞아떨어질 때만** 고친다 — 짝이 안 맞으면 무엇을
+        고쳐야 할지 알 수 없고, 찍어서 고치면 원문이 훼손된다.
+        """
+        if not self.title_brackets or not self.close_alt:
+            return text
+        alt = self.close_alt
+
+        # ① '[' 로 열고 이상한 글자로 닫은 것 → ']' 로
+        opened = text.find("[")
+        if opened >= 0 and "]" not in text[opened:]:
+            for j in range(opened + 1, len(text)):
+                if text[j] in alt:
+                    fixed = text[:j] + "]" + text[j + 1:]
+                    changes.append(Change(page_no, "bracket", text[j], "]",
+                                          _ctx(text, j, j + 1)))
+                    return fixed
+
+        # ② 닫는 글자로 열고 ']' 로 닫은 것 → '[' 로
+        closed = text.find("]")
+        if closed > 0 and "[" not in text[:closed]:
+            for j in range(closed):
+                if text[j] in alt and j + 1 < len(text) and text[j + 1] not in " \t":
+                    fixed = text[:j] + "[" + text[j + 1:]
+                    changes.append(Change(page_no, "bracket", text[j], "[",
+                                          _ctx(text, j, j + 1)))
+                    return fixed
+        return text
 
     # ── 사건번호 둘레 정리 (§2.1) ─────────────────────────────────
+    def _case_seps(self, text: str, page_no: int, changes: list[Change]) -> str:
+        """사건번호 안에 낀 콜론 따위를 지운다 (§P1-1).
+
+        '96다:30113' 은 사건번호 정규식이 통째로 빗나간다. 부호와 일련번호
+        사이에서만 지우므로 '판시: 30113' 같은 본문은 건드리지 않는다.
+        """
+        if not self.case_sep:
+            return text
+
+        def sub(m: re.Match) -> str:
+            fixed = m.group("head") + m.group("serial")
+            changes.append(Change(page_no, "case_sep", m.group(0), fixed,
+                                  _ctx(text, m.start(), m.end())))
+            return fixed
+
+        return self.case_sep.sub(sub, text)
+
     def _cases(self, text: str, page_no: int, changes: list[Change]) -> str:
         """사건번호를 하나씩 훑으며 앞뒤 괄호·내부 공백·별표를 바로잡는다."""
         out, cursor = [], 0
@@ -142,6 +307,40 @@ class Normalizer:
         out.append(text[cursor:])
         return "".join(out)
 
+    # ── 로마자 절 번호 되살리기 (§P0-1) ──────────────────────────
+    def _roman_head(self, text: str, page_no: int, changes: list[Change]) -> str:
+        """줄 맨 앞의 로마자 절 번호를 되돌린다.
+
+        'Ill. 중복소제기'(소문자 L), '।. 의의'(데바나가리 단다), 'H . 사유'(II)
+        가 헤딩으로 안 잡히면 그 절 전체가 목차에서 사라진다. **줄 맨 앞 +
+        뒤에 구분점 또는 공백 + 한글 제목**일 때만 고친다. 문장 속 'l' 을
+        건드리면 본문이 망가진다.
+
+        구분점이 '•' 같은 것으로 흘러나온 자리도 마침표로 되돌린다. 종이에
+        찍힌 것은 마침표다. 안 되돌리면 뒤의 헤딩 정규식마다 이 글자를 하나씩
+        더 받아야 하고, 하나만 빠뜨리면 그 절이 통째로 사라진다.
+        """
+        if not self.roman:
+            return text
+        m = self.roman_rx.match(text) or self.roman_inline_rx.search(text)
+        if not m:
+            return text
+
+        raw = m.group("num")
+        fixed = self.roman.get(raw) or raw
+        sep = m.group("sep")
+        if fixed == raw and (not sep or sep == "."):
+            return text
+
+        # 번호와 제목 사이를 한 꼴로 맞춘다: 'H . 사유' → 'II. 사유'.
+        # 구분점이 없던 자리에 마침표를 새로 넣지는 않는다.
+        tail = ". " if sep else " "
+        out = text[:m.start("num")] + fixed + tail + text[m.end():]
+        changes.append(Change(page_no, "roman", text[m.start("num"):m.end()].strip(),
+                              (fixed + tail).strip(),
+                              _ctx(text, m.start("num"), m.end())))
+        return out
+
     # ── 조문 공백 (§4.1) ─────────────────────────────────────────
     def _articles(self, text: str) -> str:
         return self.pat.article.sub(lambda m: f"제{m.group('num')}{m.group('unit')}", text)
@@ -173,10 +372,13 @@ class Normalizer:
                 if self.date_hangul == "strip":
                     cursor += k
             if junk or hangul_tail:
+                # 기록에는 날짜와 바로 뒤 몇 글자만 남긴다. 뒤 문장을 통째로
+                # 물고 오면 사람이 무엇이 바뀐 건지 못 알아본다.
+                tail_shown = hangul_tail[:4]
                 changes.append(Change(
-                    page_no, "date", m.group(0) + junk + hangul_tail,
+                    page_no, "date", m.group(0) + junk + tail_shown,
                     canon if (self.date_hangul == "strip" or not hangul_tail)
-                    else canon + hangul_tail,
+                    else canon + tail_shown,
                     _ctx(text, m.start(), m.end())))
             elif canon != m.group(0):
                 changes.append(Change(page_no, "date", m.group(0), canon,
@@ -221,3 +423,26 @@ def _ctx(text: str, start: int, end: int, width: int = 30) -> str:
     left = text[max(0, start - width):start]
     right = text[end:end + width]
     return f"…{left}〖{text[start:end]}〗{right}…"
+
+
+def _case_sep_rx(cfg: dict, seps) -> "re.Pattern | None":
+    """연도+부호 뒤, 일련번호 앞에 낀 구분자만 잡는 정규식."""
+    seps = [s for s in (seps or []) if s]
+    if not seps:
+        return None
+    suffixes = sorted(cfg["preserve"]["case_suffixes"], key=len, reverse=True)
+    alt = "|".join(re.escape(s) for s in suffixes)
+    cls = "[" + re.escape("".join(seps)) + "]"
+    return re.compile(
+        rf"(?<![0-9A-Za-z])(?P<head>\d{{2,4}}[ \t]*(?:{alt}))[ \t]*{cls}[ \t]*"
+        rf"(?P<serial>\d+)(?![0-9])")
+
+
+def _roman_table(spec: dict) -> dict:
+    """{오인식 글자: 바른 로마자} 표를 만든다."""
+    table = {}
+    for good, bad_list in (spec or {}).items():
+        table[str(good)] = str(good)
+        for bad in bad_list or []:
+            table[str(bad)] = str(good)
+    return table
