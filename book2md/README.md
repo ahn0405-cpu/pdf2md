@@ -8,8 +8,36 @@
 기존 `../dist/pdf2md.html`(특허 서식용 브라우저 도구)과는 별개 프로그램이다.
 쓰임이 다르고 지켜야 할 것이 다르다.
 
-다른 교재(특허법 등)로 이어 쓰려면 **`HANDOFF.md`** 를 먼저 읽을 것.
-프로그램은 교재를 가리지 않는다. 교재마다 다른 것은 전부 `config.yaml` 에 있다.
+## 교재가 여럿일 때 — 설정은 층으로 쌓는다
+
+교재를 동시에 변환한다. 프로그램은 하나, 설정은 층이다.
+
+```
+config.yaml           공통 — 사건번호 문법, 각주·두문자 판정, 검증 기준, 프로파일
+config-민소법.yaml     교재별 — 사람이 확인한 정정, 책 제목, 그 판형의 오인식
+config-특허법.yaml     교재별
+```
+
+```bash
+./convert --book 민소법 all "PDF폴더" --out 출력
+./convert --config config.yaml --config config-민소법.yaml all …   # 같은 뜻
+```
+
+공통 규칙을 고치면 두 교재에 함께 반영된다. 반대로 **사람이 확인한 정정과 책
+제목은 교재를 넘어가면 해를 끼친다** — 민소법 원문에서 확인한 정정 14개가
+특허법 원문에 적용되면 안 된다. 그래서 그것만 교재별 파일에 둔다.
+
+층을 합칠 때 딕셔너리는 깊이 합치고 **목록과 낱값은 갈아 끼운다.** 이어 붙이면
+위층에서 뺄 방법이 없어져 층을 나눈 뜻이 없어진다.
+
+명령은 **무엇을 읽었는지 첫 줄에 찍는다.** `--book` 을 빠뜨리면 정정이 조용히
+빠진 채 변환되므로, 안 읽었으면 경고도 함께 낸다.
+
+```
+설정: config.yaml + config-민소법.yaml
+```
+
+새 교재를 시작할 때는 **`HANDOFF.md`** 를 먼저 읽을 것.
 
 ## 설치
 
@@ -46,10 +74,10 @@ pip install -r requirements.txt          # PyYAML + PyMuPDF
 ./convert crosscheck output/기본서 output/사례집
 
 # 5) 기본서 ↔ 사례집 매핑 (변환이 끝난 뒤). 출력 루트만 주면 된다.
-./mapping build output -o mapping.yaml
-./mapping review mapping.yaml
-./mapping confirm mapping.yaml --section "IV. 시효중단"
-./mapping validate mapping.yaml
+./convert --book 민소법 mapping build output -o mapping.yaml
+./convert --book 민소법 mapping review mapping.yaml
+./convert --book 민소법 mapping confirm mapping.yaml --section "IV. 시효중단"
+./convert --book 민소법 mapping validate mapping.yaml
 
 # 진단이 "없다" 고 할 때 — 원문 증거를 그대로 뜬다
 ./convert probe 기본서.pdf                    # 괄호·색·도형·옆번호·두문자 후보
@@ -145,7 +173,7 @@ output/
 단계가 사안을 지어낸다.
 
 ```bash
-./mapping build output -o mapping.yaml
+./convert --book 민소법 mapping build output -o mapping.yaml
 ```
 
 **출력 루트 하나만 주면 된다.** 어느 파일이 기본서고 어느 파일이 사례집인지는
@@ -249,10 +277,10 @@ score 가 1 이어도 `mappings` 로 올린다.** `evidence.answer_outline` 에 
 틀리므로 사람 승인을 반드시 거친다.
 
 ```bash
-./mapping review mapping.yaml            # 승인 대기 목록
-./mapping confirm mapping.yaml --all
-./mapping confirm mapping.yaml --section "IV. 시효중단"
-./mapping validate mapping.yaml          # M1~M4
+./convert --book 민소법 mapping review mapping.yaml       # 승인 대기 목록
+./convert --book 민소법 mapping confirm mapping.yaml --all
+./convert --book 민소법 mapping confirm mapping.yaml --section "IV. 시효중단"
+./convert --book 민소법 mapping validate mapping.yaml     # M1~M4
 ```
 
 `confirm` 은 yaml 을 다시 써 내지 않고 `confirmed:` 줄만 고친다. 다시 써 내면

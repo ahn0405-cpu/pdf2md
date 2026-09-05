@@ -26,7 +26,9 @@ from book2md.structure import Structurer, render                 # noqa: E402
 from book2md.split import split, front_matter, filename                    # noqa: E402
 from book2md.validate import validate                            # noqa: E402
 
-CFG = load_config(ROOT / "config.yaml")
+# 설정은 층으로 쌓는다. 회귀 테스트는 민소법 층까지 얹은 상태를 본다 —
+# 사람이 확인한 정정과 'H' → 'II' 가 거기 있다.
+CFG = load_config([ROOT / "config.yaml", ROOT / "config-민소법.yaml"])
 PAT = Patterns.build(CFG)
 
 
@@ -1580,6 +1582,47 @@ parser: pymupdf
         self.assertIn("E-5(10점, primary)", out)
         self.assertIn("[!] 070 상소이익 > III. 판단기준", out)
         self.assertIn("⚠️ 근거", out)
+
+
+class 설정_층쌓기(unittest.TestCase):
+    """교재를 여럿 동시에 변환한다. 공통 규칙은 한 곳, 교재별 규칙은 따로."""
+
+    def test_교재별_층이_공통_위에_얹힌다(self):
+        base = load_config(ROOT / "config.yaml")
+        both = load_config([ROOT / "config.yaml", ROOT / "config-민소법.yaml"])
+        # 공통에는 교재별 값이 없다
+        self.assertEqual(base.get("corrections"), [])
+        self.assertEqual(base["running"]["never_heading"], [])
+        self.assertIsNone(base["profiles"]["textbook"].get("roman_heads_extra"))
+        # 층을 얹으면 들어온다
+        self.assertEqual(len(both["corrections"]), 14)
+        self.assertTrue(both["running"]["never_heading"])
+        self.assertEqual(both["profiles"]["textbook"]["roman_heads_extra"],
+                         {"II": ["H"]})
+        # 공통 규칙은 그대로 살아 있다
+        self.assertEqual(base["preserve"]["known_suffixes"],
+                         both["preserve"]["known_suffixes"])
+
+    def test_목록은_이어_붙이지_않고_갈아_끼운다(self):
+        """이어 붙이면 위층에서 뺄 방법이 없다. 민소법 정정을 특허법이
+        물려받고 지우지 못하면 층을 나눈 뜻이 없다."""
+        import tempfile as _t
+        d = Path(_t.mkdtemp())
+        (d / "a.yaml").write_text("corrections: [{find: x, to: y}]\nkeep: 1\n",
+                                  encoding="utf-8")
+        (d / "b.yaml").write_text("corrections: []\n", encoding="utf-8")
+        try:
+            cfg = load_config([d / "a.yaml", d / "b.yaml"])
+            self.assertEqual(cfg["corrections"], [])
+            self.assertEqual(cfg["keep"], 1)      # 안 건드린 것은 남는다
+        finally:
+            shutil.rmtree(d, ignore_errors=True)
+
+    def test_읽은_층을_기록에_남긴다(self):
+        """교재별 층을 빠뜨리면 정정이 조용히 빠진다. 무엇을 읽었는지 남긴다."""
+        cfg = load_config([ROOT / "config.yaml", ROOT / "config-민소법.yaml"])
+        self.assertEqual([Path(p).name for p in cfg["_paths"]],
+                         ["config.yaml", "config-민소법.yaml"])
 
 
 class 목차띠_읽기(unittest.TestCase):

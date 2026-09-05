@@ -45,7 +45,10 @@ def main(argv=None) -> int:
     _force_utf8()
     ap = argparse.ArgumentParser(
         prog="convert", description="민사소송법 기본서·사례집 PDF → Markdown")
-    ap.add_argument("--config", help="config.yaml 경로")
+    ap.add_argument("--config", action="append", metavar="파일",
+                    help="설정 파일. 여러 번 주면 순서대로 얹는다")
+    ap.add_argument("--book", metavar="이름",
+                    help="교재별 설정을 함께 읽는다. '민소법' → config-민소법.yaml")
     sub = ap.add_subparsers(dest="cmd", required=True)
 
     d = sub.add_parser("diagnose", help="사전 진단 (§3.1). 변환 전 반드시 먼저.")
@@ -137,8 +140,33 @@ def main(argv=None) -> int:
     sub.add_parser("parsers", help="쓸 수 있는 파서 보기")
 
     args = ap.parse_args(argv)
-    cfg = load_config(args.config)
+    cfg = load_config(_config_layers(args))
+    # 어느 층을 읽었는지 매번 찍는다. 교재별 층을 빠뜨리면 사람이 확인한
+    # 정정이 조용히 빠진 채 변환이 돌아, 나중에 원인을 찾기 어렵다.
+    print("설정: " + " + ".join(Path(p).name for p in cfg["_paths"]))
+    if len(cfg["_paths"]) == 1:
+        print("  ※ 교재별 설정을 안 읽었다. `--book 민소법` 을 붙일 것.",
+              file=sys.stderr)
     return globals()[f"_cmd_{args.cmd.replace('-', '_')}"](args, cfg)
+
+
+def _config_layers(args) -> list:
+    """--config 와 --book 을 읽는 순서대로 늘어놓는다."""
+    from .config import DEFAULT_CONFIG, ROOT
+    out: list = []
+    for item in (args.config or []):
+        out.extend(x.strip() for x in str(item).split(",") if x.strip())
+    if not out:
+        out = [str(DEFAULT_CONFIG)]
+    if args.book:
+        p = ROOT / f"config-{args.book}.yaml"
+        if not p.exists():
+            raise SystemExit(f"교재 설정이 없다: {p}\n"
+                             f"쓸 수 있는 것: " +
+                             ", ".join(sorted(x.stem.replace("config-", "")
+                                              for x in ROOT.glob("config-*.yaml"))))
+        out.append(str(p))
+    return out
 
 
 # ── audit-sections ──────────────────────────────────────────────

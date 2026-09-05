@@ -4,13 +4,24 @@
 **새 세션은 이 파일부터 읽으면 된다.**
 
 프로그램은 새로 만들지 않는다. `book2md` 는 교재를 가리지 않게 만들어 두었고(§9),
-교재마다 다른 것은 전부 `config.yaml` 에 있다. 특허법용 설정을 따로 두고
-`--config` 로 지정한다.
+교재마다 다른 것은 **교재별 설정 파일**에 있다. 설정은 층으로 쌓는다.
+
+```
+config.yaml           공통 — 사건번호 문법, 각주·두문자 판정, 검증 기준
+config-민소법.yaml     교재별 — 사람이 확인한 정정, 책 제목, 그 판형의 오인식
+config-특허법.yaml     교재별  ← 새 교재는 이 파일 하나를 만든다
+```
 
 ```bat
-copy config.yaml config-patent.yaml
-convert --config config-patent.yaml diagnose "특허법 PDF 폴더"
+convert --book 특허법 diagnose "특허법 PDF 폴더" --out 특허출력
 ```
+
+**복사본을 만들지 말 것.** 공통 규칙을 고치면 두 교재에 함께 반영돼야 한다.
+이번에 고친 결함 다섯(띠 낱말, 목차 항목 재사용, 러닝 헤더, 점검기 오탐 셋)은
+전부 스캔+OCR 교재의 일반 결함이라 특허법에서도 똑같이 난다.
+
+교재별 파일에는 **교재를 넘어가면 해를 끼치는 것만** 둔다. 민소법 원문에서
+사람이 확인한 정정 14개가 특허법 원문에 적용되면 안 된다.
 
 ---
 
@@ -29,13 +40,14 @@ convert --config config-patent.yaml diagnose "특허법 PDF 폴더"
 
 | 명령 | 하는 일 |
 |---|---|
+| `convert --book <교재> …` | 교재별 설정을 함께 읽는다. **빠뜨리면 정정이 조용히 빠진다** |
 | `convert diagnose <PDF폴더>` | 사전 진단. **이걸 건너뛰면 run 이 막힌다** |
 | `convert all <PDF폴더> --out <출력>` | 진단→변환→검증→교차검증 한 번에 |
 | `convert audit-sections <출력> --out audit.md` | 절 제목 전수 점검. 재변환 없이 변환물만 읽는다 |
 | `convert probe <PDF> --lines --pages 170-173` | 줄마다 무엇으로 읽혔는지. 헤딩이 안 잡힐 때 |
 | `convert apply-decisions <결정표>` | 두문자 결정표에 표시한 대로 config 를 고친다 |
-| `mapping build <출력> -o mapping.yaml --report dbg.md` | 기본서↔사례집 매핑 |
-| `mapping review / confirm / validate` | 승인 대기 목록 · 승인 · 검증 |
+| `convert mapping build <출력> -o mapping.yaml --report dbg.md` | 기본서↔사례집 매핑 |
+| `convert mapping review / confirm / validate` | 승인 대기 목록 · 승인 · 검증 |
 
 두 도구 다 **아무것도 자동 승인하지 않는다.** 사람 판단이 필요한 자리(두문자 결정,
 매핑 승인, 사건번호 육안 검수)는 리포트로 넘긴다.
