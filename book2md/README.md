@@ -37,6 +37,11 @@ config-특허법.yaml     교재별
 설정: config.yaml + config-민소법.yaml
 ```
 
+| 교재 | 명령 |
+|---|---|
+| 민사소송법 | `./convert --book 민소법 …` |
+| 특허법 | `./convert --book patent …` — `config-patent.yaml`. 진단을 보고 채울 자리는 `TODO(진단)` 으로 표시돼 있다 |
+
 새 교재를 시작할 때는 **`HANDOFF.md`** 를 먼저 읽을 것.
 
 ## 설치
