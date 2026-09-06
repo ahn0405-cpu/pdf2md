@@ -76,6 +76,10 @@ def 기본서읽기(path: Path):
     절, 들고감, 표, 물린수 = None, set(), {}, {}
     for line in body.splitlines():
         plain = _마크업.sub("", line)
+        if re.match(r"^\[\^\d+\]:", plain):
+            # 각주 줄. 여기 나오는 사건번호에 앞 항목의 두문자를 물리면 안 된다.
+            # 실측 각주 257 의 76다1313 이 항목 8 의 '부원공 어패다기' 를 받았다.
+            continue
         h = re.match(r"^#{4}\s+(.*)$", line)
         if h:
             절 = re.sub(r"\[\^\d+\]|`[^`]*`|==", "", h.group(1)).strip()
