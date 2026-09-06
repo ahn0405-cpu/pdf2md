@@ -9,7 +9,7 @@ cases:
     standard: false
 mnemonics: ["일외별명일", "확객시전", "종확나시", "일나시 나소시"]
 articles: ["제259조", "제216조1항", "제265조", "제218조", "제203조"]
-converted: 2026-08-30
+converted: 2026-09-06
 parser: pymupdf
 validation: WARN
 ---
