@@ -35,8 +35,13 @@ def _roman_head_rx(table: dict, head_seps=None):
     chars -= set(".,·  \t")
     cls = "".join(sorted(chars))
     seps = re.escape("".join(sorted(set(head_seps or ".,·"))))
+    # 번호와 구분점 사이에 강조 표시가 끼어든다. 저자가 번호와 제목을 따로
+    # 칠해 놓아서 파서가 조각마다 '==' 를 붙이기 때문이다.
+    #   실측 '==Ill== ==. 절차==(17)'  ·  '==||== . ==요건== ==1. 원칙=='
+    # 이걸 안 넘기면 번호 복구가 통째로 안 걸려 그 절이 목차에서 사라진다.
+    mk = r"(?:\s*(?:==|\*\*))*"
     num = (rf"(?P<num>[{re.escape(cls)}]{{1,5}})"
-           rf"(?:\s*(?P<sep>[{seps}])\s*|\s+)(?=[가-힣])")
+           rf"(?:{mk}\s*(?P<sep>[{seps}])\s*{mk}\s*|\s+)(?=[가-힣])")
     head = re.compile(rf"^(?:[=*]{{2}})?\s*{num}")
     # 앞 문단 끝에 붙어 버린 제목: '…위함이다.[^73] ==H . 사유== i) 제34조…'
     # 문장이 끝난 자리 + 강조 여는 표시 바로 뒤일 때만 본다.
@@ -94,6 +99,7 @@ class Normalizer:
         for num, extra in ((prof or {}).get("roman_heads_extra", {}) or {}).items():
             heads[num] = list(heads.get(num, [])) + list(extra)
         self.head_seps = n.get("head_seps", [".", ",", "·"])
+        self.head_dot_max = int(n.get("roman_head_dot_max_len", 40))
         self.roman = _roman_table(heads)
         self.roman_rx, self.roman_inline_rx = _roman_head_rx(
             self.roman, self.head_seps)
@@ -333,8 +339,17 @@ class Normalizer:
             return text
 
         # 번호와 제목 사이를 한 꼴로 맞춘다: 'H . 사유' → 'II. 사유'.
-        # 구분점이 없던 자리에 마침표를 새로 넣지는 않는다.
-        tail = ". " if sep else " "
+        #
+        # 구분점이 없던 자리에는 원칙적으로 마침표를 새로 넣지 않는다. 다만
+        # **표에서 실제로 고쳐진 번호**라면 넣는다. 오인식 글자가 구분점까지
+        # 삼킨 자리이기 때문이다 — 실측 'IIL 경험칙 위반이 상고이유인지 여부'
+        # 는 종이에 'III. 경험칙…' 으로 찍혀 있다. 마침표가 없으면 헤딩
+        # 규칙이 못 받아 그 절이 목차에서 사라진다.
+        #
+        # 본문 문단을 제목으로 만들지 않도록 짧은 줄에서만 넣는다.
+        rest = text[m.end():].strip()
+        eaten = fixed != raw and len(rest) <= self.head_dot_max
+        tail = ". " if (sep or eaten) else " "
         out = text[:m.start("num")] + fixed + tail + text[m.end():]
         changes.append(Change(page_no, "roman", text[m.start("num"):m.end()].strip(),
                               (fixed + tail).strip(),

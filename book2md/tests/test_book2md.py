@@ -1604,6 +1604,57 @@ parser: pymupdf
         self.assertIn("⚠️ 근거", out)
 
 
+class 강조표시에_갈린_절번호(unittest.TestCase):
+    """저자가 번호와 제목을 따로 칠해 놓아 파서가 조각마다 '==' 를 붙인다.
+
+    실측으로 절 여섯이 이것 때문에 목차에서 사라졌다.
+    """
+
+    def _norm(self, text):
+        prof = dict(get_profile(CFG, "textbook"))
+        prof["_config"] = CFG
+        return Normalizer(CFG, PAT, prof).normalize_line(text, 1, [])
+
+    def _heads(self, text):
+        from book2md.structure import Structurer
+        from book2md.model import Line, Page
+        prof = dict(get_profile(CFG, "textbook"))
+        prof["_config"] = CFG
+        st = Structurer(CFG, prof, PAT)
+        st.feed(Page(number=1, lines=[Line(text=t, size=10) for t in
+                                      ["079 논점", "==◎ 의의-상고이유-절차==",
+                                       self._norm(text)]]), [])
+        return [b.text for b in st.finish() if b.kind == "heading" and b.level == 4]
+
+    def test_번호와_구분점_사이의_강조표시를_넘어간다(self):
+        """실측 '==Ill== ==. 절차==(17)' — 번호와 마침표가 따로 칠해져 있다."""
+        self.assertEqual(self._norm("==Ill== ==. 절차==(17)"), "==III. 절차==(17)")
+        self.assertTrue(self._heads("==Ill== ==. 절차==(17)"))
+
+    def test_파이프로_흘러나온_번호를_되돌린다(self):
+        """실측 '==|| . 심리방식==' · '==||| . 소송기록의 송부=='"""
+        self.assertEqual(self._norm("==|| . 심리방식== (10)(13)"),
+                         "==II. 심리방식== (10)(13)")
+        self.assertEqual(self._norm("==||| . 소송기록의 송부== 정본을 보낸다."),
+                         "==III. 소송기록의 송부== 정본을 보낸다.")
+
+    def test_구분점까지_삼킨_자리에는_마침표를_되살린다(self):
+        """실측 'IIL 경험칙…' 은 종이에 'III. 경험칙…' 으로 찍혀 있다."""
+        self.assertEqual(self._norm("==IIL 경험칙 위반이 상고이유인지 여부=="),
+                         "==III. 경험칙 위반이 상고이유인지 여부==")
+        self.assertTrue(self._heads("==IIL 경험칙 위반이 상고이유인지 여부=="))
+
+    def test_긴_본문_문단은_제목으로_만들지_않는다(self):
+        """번호를 고치더라도 마침표를 넣어 문단을 제목으로 승격하면 안 된다."""
+        본문 = ("ll 원칙에 따라 소송물은 일부에 한정되고 잔부는 후소로 구할 수 "
+              "있으며 판결의 모순도 생기지 않는다.")
+        self.assertNotIn("II.", self._norm(본문))
+        self.assertEqual(self._heads(본문), [])
+
+    def test_문장_속_파이프는_건드리지_않는다(self):
+        self.assertEqual(self._norm("그 요건은 || 로 표시한다."), "그 요건은 || 로 표시한다.")
+
+
 class 설정_층쌓기(unittest.TestCase):
     """교재를 여럿 동시에 변환한다. 공통 규칙은 한 곳, 교재별 규칙은 따로."""
 
