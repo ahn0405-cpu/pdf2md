@@ -5,15 +5,29 @@ import re, sys, glob, os
 BOLD = re.compile(r'\*\*(.+?)\*\*')
 
 def bold_too_long(path, limit=15):
+    """BOLD 는 줄바꿈을 넘는다. 한 줄씩 보면 `**A** … **B**` 사이를 BOLD 로
+    오인하므로, 파일 전체를 re.DOTALL 로 한 번에 짝짓는다."""
+    s = open(path, encoding='utf-8').read()
+    시작줄 = [0] * (len(s) + 1)
+    n = 1
+    for i, ch in enumerate(s):
+        시작줄[i] = n
+        if ch == '\n':
+            n += 1
+    시작줄[len(s)] = n
+    # 암기노트는 **판시 원문에서만** 빈칸을 뽑는다(samples/암기노트 머리말).
+    # 해설 본문의 강조는 빈칸이 되지 않으므로 자수 규칙의 대상이 아니다.
+    판시 = []
+    for line in s.split('\n'):
+        q = line.lstrip().startswith('>') and not line.lstrip().lstrip('>').lstrip().startswith('|')
+        판시.extend([q] * (len(line) + 1))
     hits = []
-    for i, line in enumerate(open(path, encoding='utf-8'), 1):
-        if line.lstrip().startswith('|'):      # 표 안은 제외
+    for m in re.finditer(r'\*\*(.+?)\*\*', s, re.S):
+        if m.start() >= len(판시) or not 판시[m.start()]:   # 판시 인용문만 본다
             continue
-        for m in BOLD.finditer(line):
-            t = m.group(1)
-            t = re.sub(r'[`\[\]()·,/…\s]', '', t)   # 기호·공백 제외하고 센다
-            if len(t) > limit:
-                hits.append((i, len(t), m.group(1)))
+        t = re.sub(r'[`\[\]()·,/…\s>\n]', '', m.group(1))   # 기호·공백 제외하고 센다
+        if len(t) > limit:
+            hits.append((시작줄[m.start()], len(t), m.group(1)))
     return hits
 
 def heading_depth(path):
@@ -61,7 +75,7 @@ def main(paths):
     for p in sorted(paths):
         msgs = []
         b = bold_too_long(p)
-        if b: msgs.append(f'BOLD 10자 초과 {len(b)}건: ' +
+        if b: msgs.append(f'BOLD 15자 초과 {len(b)}건: ' +
                           ', '.join(f'{ln}행({n}자)' for ln, n, _ in b[:6]) +
                           (' …' if len(b) > 6 else ''))
         h = heading_depth(p)
