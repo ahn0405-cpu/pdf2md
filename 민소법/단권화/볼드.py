@@ -1,6 +1,6 @@
 import re, sys
 BOLD = re.compile(r'\*\*(.+?)\*\*', re.S)
-def dump(path, only_quote=True, limit=10):
+def dump(path, only_quote=True, limit=15):
     s=open(path,encoding='utf-8').read(); lines=s.split('\n')
     isq=[]
     for ln in lines:

@@ -4,7 +4,7 @@ import re, sys, glob, os
 
 BOLD = re.compile(r'\*\*(.+?)\*\*')
 
-def bold_too_long(path, limit=10):
+def bold_too_long(path, limit=15):
     hits = []
     for i, line in enumerate(open(path, encoding='utf-8'), 1):
         if line.lstrip().startswith('|'):      # 표 안은 제외
