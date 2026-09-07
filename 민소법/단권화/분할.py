@@ -10,6 +10,7 @@ def split(path, specs):
     used=set(); fails=[]
     def repl(m):
         inner=m.group(1); n=norm(inner)
+        if len(n)<=15: return m.group(0)   # 이미 적합한 BOLD는 건드리지 않는다
         for i,(key,segs) in enumerate(specs):
             if i in used: continue
             if not n.startswith(norm(key)): continue
