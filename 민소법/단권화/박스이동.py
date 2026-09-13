@@ -61,16 +61,17 @@ def 이동(path, 박스키, 앵커, 레벨=None):
     if bs < a:
         print(f"❌ {path}: 박스가 앵커보다 앞에 있습니다")
         return False
-    _, ae, alvl = _블록(L, a)
 
+    # 떼어낸 **뒤의** 목록에서 앵커 블록 끝을 다시 잰다.
+    # 떼기 전 목록으로 재면 박스가 앵커 앞에 있던 만큼 삽입 위치가 밀린다.
+    나머지 = L[:bs] + L[be:]
+    a = [i for i, l in enumerate(나머지) if l.startswith(앵커)][0]
+    _, ae, alvl = _블록(나머지, a)
     새레벨 = 레벨 if 레벨 else alvl
     d = 새레벨 - blvl
     if d:
         블록 = [("#" * max(1, len(m.group(1)) + d) + l[len(m.group(1)):]) if (m := _H.match(l)) else l
                 for l in 블록]
-
-    # 떼어내고 끼워 넣는다 (뒤에서부터)
-    나머지 = L[:bs] + L[be:]
     # 떼어낸 뒤 남은 구분선·빈 줄 정리
     while len(나머지) > bs and 나머지[bs].strip() == "" and bs > 0 and 나머지[bs - 1].strip() == "":
         del 나머지[bs]
