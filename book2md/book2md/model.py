@@ -50,6 +50,26 @@ class Page:
         return "\n".join(l.text for l in self.lines if zone is None or l.zone == zone)
 
 
+def is_generated(path) -> bool:
+    """우리가 만든 결과물인가.
+
+    프론트매터 전체를 보고 판단한다. 앞 몇백 자만 보면 사건번호가 많은 파일은
+    `parser:` 가 그 밖으로 밀려나 남의 파일로 오해된다. 그러면 검증이 그 파일을
+    통째로 건너뛰어 사건번호도 별표도 0 이 된다.
+    """
+    try:
+        with open(path, encoding="utf-8") as fh:
+            head = fh.read(20000)
+    except Exception:
+        return False
+    if not head.startswith("---\n"):
+        return False
+    end = head.find("\n---\n", 4)
+    if end < 0:
+        return False
+    return "\nparser:" in head[:end]
+
+
 def dump_pages(pages: Iterable[Page], path) -> int:
     """페이지를 jsonl 로 흘려 쓴다. 쓴 쪽수를 돌려준다."""
     n = 0

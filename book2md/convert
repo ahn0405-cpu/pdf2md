@@ -1,4 +1,4 @@
 #!/usr/bin/env sh
 # 지침 §7 의 명령 이름 그대로 쓰기 위한 실행기.
-#   ./convert diagnose 기본서.pdf
+#   ./convert --book 민소법 all "PDF폴더" --out 출력
 exec python3 -m book2md "$@"

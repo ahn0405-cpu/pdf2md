@@ -22,6 +22,22 @@ _LIST_HEAD = re.compile(
 _SENT_END = re.compile(r"(?:[.?!]|다\.|음\.|함\.|[」』’”\)])\s*$")
 _CJK = re.compile(r"[가-힣ㄱ-ㅎㅏ-ㅣ぀-ヿ一-鿿]")
 _NUM_ITEM = re.compile(r"^(\d{1,2})\s*\.\s*")
+#: 색으로 감싼 제목이 줄 안에 박혀 있는 자리 (§6.1). 줄 맨 앞일 수도 있고,
+#: 앞 문단 끝에 붙어 있을 수도 있다 — '…위함이다.[^73] ==II. 사유== i) 제34조…'
+_RUNIN = re.compile(
+    r"^(?P<before>.*?)(?P<mark>==|\*\*)(?P<head>[^=*\n]{2,60}?)(?P=mark)"
+    r"\s+(?P<rest>\S.*)$")
+#: 제목이 줄 가운데에 오려면 앞이 문장으로 끝나야 한다. 각주 참조로 끝나도 된다.
+_RUNIN_BEFORE = re.compile(r"(?:[.?!\]\)]|다\.|음\.|함\.)\s*$")
+
+#: 번호 자리에 낀 잡글자 + 제목. 잡글자에 한글은 못 들어간다.
+_OUTLINE_JUNK = re.compile(
+    r"^(?P<junk>[^가-힣\s]{1,6}[.,·•‧∙・)\]]?\s*)(?P<rest>[가-힣].*)$")
+#: 알아볼 수 있는 번호. 이런 것은 기존 규칙이 이미 맡고 있으므로 넘긴다.
+_KNOWN_NUM = re.compile(r"^[\d IVXivx.,·•‧∙・()\[\]]+$")
+#: 문장으로 끝나면 제목이 아니다. 닫는 괄호는 세지 않는다 — 제목 뒤에
+#: 기출연도가 '(17)' 로 붙는 일이 잦다.
+_OUTLINE_NOT_HEAD = re.compile(r"(?:[.?!]|다\.|음\.|함\.)\s*$")
 
 
 @dataclass
@@ -32,6 +48,7 @@ class Block:
     page: int = 0
     cases: list = field(default_factory=list)      # [{id,label,standard}]
     mnemonics: list = field(default_factory=list)
+    articles: list = field(default_factory=list)   # 인용된 조문 (§P1-2)
     meta: dict = field(default_factory=dict)       # exam_years / sidenote / outline …
 
 
@@ -51,6 +68,10 @@ class Structurer:
         self._sidenotes: list[dict] = []
         self._in_prompt = False
         self._page = 0
+        #: 들어온 줄에서 본 강조 글자 수. finish() 에서 결과물과 견줘
+        #: '헤딩 제목으로 들어가면서 마크업이 걷힌 양'을 낸다 (§5.4 대조용).
+        self.seen_chars = 0
+        self.absorbed_chars = 0
 
         legend = cfg["legend"]
         self._exam_rx = re.compile(legend["exam_year"]["pattern"])
@@ -62,8 +83,22 @@ class Structurer:
         self._label_rx = re.compile(legend["case_label"]["pattern"])
         self._outline = legend["outline"]
         self._side_rx = re.compile(legend["sidenote"]["pattern"])
+        self._toc_rx = re.compile(cfg.get("toc", {}).get("line", r"(?!)"))
         self._side_tol = float(legend["sidenote"].get("match_tolerance", 12))
 
+        self._outline_names: list[str] = []
+        #: 이미 다른 절이 집어 간 목차 항목. 번호가 뭉개진 줄이 뒤늦게 같은
+        #: 항목을 다시 집으면 가짜 절이 생긴다 (실측 '(D 의의').
+        self._outline_taken: set = set()
+        self._outline_use = bool(prof.get("outline_heading", True))
+        self._outline_junk = int(prof.get("outline_junk_max", 4))
+        self._band_lead = (cfg.get("legend", {}).get("outline", {})
+                           .get("lead_marker"))
+        self._never_head = [re.compile(p) for p in
+                            (cfg.get("running", {}).get("never_heading") or [])]
+        #: 여기서 걷어낸 줄. 파이프라인이 removed_lines.md 에 함께 적는다.
+        self.dropped: list = []
+        self._outline_tail = int(prof.get("outline_tail_max", 12))
         self._heads = [(h["level"], re.compile(h["pattern"]))
                        for h in prof.get("headings", [])]
         self._sec_rx = re.compile(prof["section_item"]) if prof.get("section_item") else None
@@ -74,6 +109,8 @@ class Structurer:
         self._score_rx = re.compile(prof["score"]) if prof.get("score") else None
         self._score_max = float(prof.get("score_max", 50))
         self._last_problem: Block | None = None
+        self._ans_max = int(prof.get("answer_heading_max_len", 40))
+        self._question_end = tuple(prof.get("question_endings", []))
         self._prompt = tuple(prof.get("prompt_markers", []))
         self._answer = tuple(prof.get("answer_markers", []))
 
@@ -83,52 +120,97 @@ class Structurer:
         self._pending.extend(footnotes)
         # 옆번호는 그 쪽 안에서만 짝짓는다. 남으면 버리지 않고 다음 쪽으로
         # 넘기지도 않는다 — 엉뚱한 헤딩에 붙는 쪽이 못 붙는 쪽보다 나쁘다.
+        # kept=False 는 '뺐다는 기록' 일 뿐이라 헤딩에 붙이지 않는다 (§P2-1).
         self._sidenotes = [dict(s) if isinstance(s, dict) else {"text": s, "y": None}
-                           for s in (page.sidenotes or [])]
+                           for s in (page.sidenotes or [])
+                           if not isinstance(s, dict) or s.get("kept", True)]
         for line in page.lines:
             text = line.stripped
             if not text:
                 self._flush_para()
                 continue
-            if self._bonus is not None and self._bonus_continues(text):
+            # 구조는 강조 표시를 걷어낸 글자로 판단한다. 색을 먼저 입히기 때문에
+            # `==IV. 시효중단==` 을 그대로 맞추면 제목이 하나도 안 걸린다.
+            plain = _strip_markup(text)
+            self.seen_chars += _emphasised_chars(text)
+            if self._toc_rx.search(plain):
+                # 목차 줄. 제목으로 삼지 않고 본문으로 흘려보낸다.
+                self._paragraph(text, page.number)
+                continue
+            if self._bonus is not None and self._bonus_continues(plain):
                 self._bonus.append(text)
                 continue
             if self._bonus is not None:
                 self._close_bonus(page.number)
-            marker = self._bonus_head(text)
+            marker = self._bonus_head(plain)
             if marker:
                 self._flush_para()
                 self._bonus, self._bonus_title = [], marker
                 continue
             if self.prof["name"] == "casebook":
-                self._feed_casebook(text, line, page.number)
+                self._feed_casebook(text, plain, line, page.number)
             else:
-                self._feed_textbook(text, line, page.number)
+                self._feed_textbook(text, plain, line, page.number)
 
     def finish(self) -> list[Block]:
         if self._bonus is not None:
             self._close_bonus(self._para_page)
         self._flush_para()
         self._flush_footnotes(final=True)
+        # 헤딩·박스 제목으로 들어가며 걷힌 강조는 사라진 게 아니라 구조가 담은 것이다.
+        kept = sum(_emphasised_chars(b.text) for b in self.blocks)
+        self.absorbed_chars = max(0, self.seen_chars - kept)
         return self.blocks
 
     # ── 기본서 (§6.1) ────────────────────────────────────────────
-    def _feed_textbook(self, text: str, line, page_no: int) -> None:
+    def _feed_textbook(self, text: str, plain: str, line, page_no: int) -> None:
+        # 머리말이 영역 판정을 빠져나와 절 제목이 되면 그 아래 본문이 통째로
+        # 엉뚱한 절에 붙는다. 영역이 놓친 자리를 글자로 한 번 더 막는다.
+        if any(rx.search(plain) for rx in self._never_head):
+            self.dropped.append((page_no, "머리말·꼬리말", plain.strip()))
+            return
+        # 제목과 본문이 한 줄에 붙어 있는 자리 (§6.1). 저자가 제목만 색으로
+        # 칠해 두었으므로 색이 경계를 알려 준다. 이걸 안 가르면 문단 전체가
+        # 제목이 되거나, 길이 때문에 제목이 통째로 본문에 묻힌다.
+        split = self._runin(text, plain)
+        if split:
+            before, head_text, head_plain, rest = split
+            if before:
+                self._paragraph(before, page_no)
+            self._feed_textbook(head_text, head_plain, line, page_no)
+            self._paragraph(rest, page_no)
+            return
         for level, rx in self._heads:
-            if rx.match(text):
-                self._heading(level, text, page_no, y=getattr(line, "y0", None))
+            if rx.match(plain):
+                self._heading(level, plain, page_no, y=getattr(line, "y0", None))
                 self._in_roman = (level == 4)
                 self._last_item = 0
+                if level <= 3:
+                    self._outline_names = []     # 논점이 바뀌면 목차도 바뀐다
+                    self._outline_taken = set()
+                elif level >= 4:
+                    self._claim_outline(plain)
                 return
-        if self._is_outline(text):
+        items = self._outline_items(plain)
+        if items:
             self._flush_para()
-            items = [t.strip() for t in re.split(self._outline["separator"], text) if t.strip()]
+            # 이 논점의 절 이름을 기억해 둔다. 번호 자리가 뭉개진 제목을
+            # 되찾는 유일한 근거다 (아래 _outline_head).
+            self._outline_names = [t for t in items if len(t) >= 2]
+            self._outline_taken = set()
             self.blocks.append(self._mk("para", text, page=page_no,
                                         meta={"outline": items}))
             return
-        m = self._sec_rx.match(text) if self._sec_rx else None
+        name = self._outline_head(plain)
+        if name:
+            self._outline_taken.add(name)
+            self._heading(4, plain, page_no, y=getattr(line, "y0", None))
+            self._in_roman = True
+            self._last_item = 0
+            return
+        m = self._sec_rx.match(plain) if self._sec_rx else None
         if m:
-            short = len(text) <= self._sec_max and not _SENT_END.search(text)
+            short = len(plain) <= self._sec_max and not _SENT_END.search(plain)
             if self._in_roman:
                 if not short:
                     # 'N. 검토 …' 처럼 한 줄에 본문까지 이어진 경우다.
@@ -137,27 +219,28 @@ class Structurer:
                     return
                 self._flush_para()
                 self._last_item = int(m.group(1))
-                self.blocks.append(self._mk("bold", f"**{_inline(self.pat, text)}**",
+                self.blocks.append(self._mk("bold", f"**{_inline(self.pat, plain)}**",
                                             page=page_no))
                 return
             if short:
-                self._heading(3, text, page_no, y=getattr(line, "y0", None))
+                self._heading(3, plain, page_no, y=getattr(line, "y0", None))
                 return
         self._paragraph(text, page_no)
 
     # ── 사례집 (§6.2, §4.7) ──────────────────────────────────────
-    def _feed_casebook(self, text: str, line, page_no: int) -> None:
+    def _feed_casebook(self, text: str, plain: str, line, page_no: int) -> None:
         if self._problem_rx:
-            m = self._problem_rx.match(text)
+            m = self._problem_rx.match(plain)
             if m and m.group(3).strip():
                 self._in_prompt = False
                 title = m.group(3).strip()
                 score, title = _split_score(self._score_rx, title, self._score_max)
+                # 문제 번호 옆 대괄호는 논점 태그이지 두문자가 아니다 (§6.2).
                 self._heading(2, f"{m.group(1)}-{m.group(2)}. {title}",
-                              page_no, score=score)
+                              page_no, score=score, mnemonics=False)
                 self._last_problem = self.blocks[-1]
                 return
-        bare = text.strip("【】[]()（） ")
+        bare = plain.strip("【】[]()（） ")
         if bare.startswith(self._prompt) or bare.startswith(self._answer):
             is_prompt = bare.startswith(self._prompt)
             label = "문제" if is_prompt else "답안"
@@ -175,16 +258,24 @@ class Structurer:
             self.blocks.append(self._mk("bold", f"**{label}**{suffix}", page=page_no))
             return
         for level, rx in self._ans_heads:
-            if rx.match(text) and len(text) <= 60:
-                self._in_prompt = False
-                score, title = _split_score(self._score_rx, text, self._score_max)
-                self._heading(level, title, page_no, score=score)
-                return
+            if self._in_prompt or not rx.match(plain):
+                # 문제 지문 안의 '(1) …' 은 설문 번호이지 답안 목차가 아니다.
+                continue
+            score, title = _split_score(self._score_rx, plain, self._score_max)
+            # 배점을 떼고 나서 길이와 마침을 본다. '2. 일부청구 소송물 (2.5)' 는
+            # 배점 괄호 때문에 문장처럼 보이지만 제목이다.
+            if len(title) > self._ans_max or _SENT_END.search(title):
+                continue
+            if self._question_end and title.rstrip(" .?").endswith(self._question_end):
+                continue        # '…설명하시오' 는 설문이지 답안 목차가 아니다
+            self._heading(level, title, page_no, score=score)
+            return
         self._paragraph(text, page_no)
 
     # ── 공통 ────────────────────────────────────────────────────
     def _heading(self, level: int, text: str, page_no: int,
-                 score: str | None = None, y: float | None = None) -> None:
+                 score: str | None = None, y: float | None = None,
+                 mnemonics: bool = True) -> None:
         self._flush_para()
         if level <= self.flush_level:
             self._flush_footnotes()
@@ -201,7 +292,7 @@ class Structurer:
         if side:
             meta["sidenote"] = side
 
-        body = _inline(self.pat, title)
+        body = _inline(self.pat, title) if mnemonics else title
         for y in years:
             body += f" `({str(y)[2:]})`"
         if side:
@@ -224,6 +315,82 @@ class Structurer:
         if dist is not None and dist <= self._side_tol:
             return self._sidenotes.pop(best)["text"]
         return None
+
+    def _outline_head(self, plain: str) -> str | None:
+        """번호 자리가 뭉개진 절 제목을 목차 띠로 되찾는다.
+
+        OCR 은 절 번호를 온갖 글자로 흘린다 — 'I.' 이 '仁j', '।', 'H' 로.
+        표에 하나씩 등록해서는 끝이 없다. 그런데 답은 이미 문서 안에 있다:
+        논점 첫 줄의 목차 띠(`◎ 의의-사유-절차-효과`)가 절 이름을 다 적어 둔다.
+
+            '仁j 의의'  →  앞의 '仁j' 를 떼면 '의의'  →  목차에 있다  →  절 제목
+
+        **앞에 한글 아닌 잡글자가 붙어 있을 때만** 본다. 잡글자가 없으면
+        '효과는 다음과 같다' 같은 본문 문단을 제목으로 오해한다.
+        """
+        if not self._outline_names or not self._outline_use:
+            return None
+        if len(plain) > self._sec_max or _OUTLINE_NOT_HEAD.search(plain):
+            return None
+        m = _OUTLINE_JUNK.match(plain)
+        if not m:
+            return None
+        junk, rest = m.group("junk"), m.group("rest")
+        if not junk.strip() or len(junk.strip()) > self._outline_junk:
+            return None
+        if _KNOWN_NUM.match(junk):
+            return None      # '1.', '(2)', 'IV.' 는 기존 규칙이 맡는다
+        if self._band_lead and re.search(self._band_lead, junk):
+            return None      # '◎ 의의-내용' 은 목차 띠다. 절 제목이 아니다.
+        for name in self._outline_names:
+            if name in self._outline_taken:
+                # 이 항목은 앞의 절이 이미 집었다. 목차 띠는 절마다 하나씩
+                # 적은 것이라, 번호가 뭉개진 줄이 다시 집으면 가짜다.
+                continue
+            if not rest.startswith(name):
+                continue
+            tail = rest[len(name):].strip()
+            if len(tail) <= self._outline_tail:
+                return name
+        return None
+
+    def _claim_outline(self, plain: str) -> None:
+        """번호가 성한 절이 목차 항목을 집는다. 뒤에 오는 복구를 막기 위해서다.
+
+        한 항목을 여러 절이 나눠 쓰는 것은 정상이다 — 실측 097 재소금지원칙은
+        '요건' 하나를 '요건-당사자 동일' '요건-소송물 동일' 셋이 나눈다.
+        번호가 성한 절끼리는 서로 막지 않고, 복구 규칙만 막는다.
+        """
+        for name in self._outline_names:
+            if name and name in plain:
+                self._outline_taken.add(name)
+
+    def _runin(self, text: str, plain: str):
+        """'==I. 의의 및 취지== 당사자와 …' 을 (제목, 나머지) 로 가른다.
+
+        색으로 감싼 앞부분이 제목 무늬에 맞고 뒤에 본문이 이어질 때만 가른다.
+        색이 없으면 가르지 않는다 — 어디까지가 제목인지 알 길이 없고,
+        찍어서 자르면 제목이 잘려 나간다.
+        """
+        m = _RUNIN.match(text)
+        if not m:
+            return None
+        before = m.group("before").strip()
+        head, rest = m.group("head").strip(), m.group("rest").strip()
+        if not head or len(rest) < int(self.prof.get("runin_min_rest", 20)):
+            return None
+        # 제목이 줄 가운데에 오려면 앞이 문장으로 끝나야 한다. 문장 도중의
+        # 강조를 제목으로 오해하면 문단이 통째로 두 동강 난다.
+        if before and not _RUNIN_BEFORE.search(before):
+            return None
+        head_plain = _strip_markup(head)
+        if len(head_plain) > int(self.prof.get("section_max_len", 40)):
+            return None
+        # 제목 무늬에 맞거나, 목차 띠가 절 이름이라고 말해 주거나.
+        if not (any(rx.match(head_plain) for _, rx in self._heads)
+                or self._outline_head(head_plain)):
+            return None
+        return (before, m.group("mark") + head + m.group("mark"), head_plain, rest)
 
     def _paragraph(self, text: str, page_no: int) -> None:
         new = bool(_LIST_HEAD.match(text)) or not self._para or _SENT_END.search(self._para[-1])
@@ -266,7 +433,14 @@ class Structurer:
 
     # ── ⑧ 보너스 논점 박스 (§4.4) ────────────────────────────────
     def _bonus_head(self, text: str) -> str | None:
-        """줄 맨 앞 ☑(또는 그 오인식) 뒤에 한글 제목이 오면 박스 시작으로 본다."""
+        """줄 맨 앞 ☑(또는 그 오인식) 뒤에 한글 제목이 오면 박스 시작으로 본다.
+
+        ☑ 오인식 목록과 절 번호 오인식은 겹친다 — '口' 가 둘 다다.
+        목차 띠가 절 이름이라고 말해 주면 그쪽을 믿는다. 박스 제목은 목차에
+        오르지 않는다.
+        """
+        if self._outline_head(text):
+            return None
         first = text[0]
         rest = text[1:].strip()
         if first == self._bonus_marker or first in self._bonus_misread:
@@ -278,6 +452,8 @@ class Structurer:
     def _bonus_continues(self, text: str) -> bool:
         if len(self._bonus) >= self._bonus_max:
             return False
+        if self._bonus_head(text):
+            return False        # 새 ☑ 가 시작하면 앞 박스는 끝난 것이다
         for _, rx in self._heads:
             if rx.match(text):
                 return False
@@ -295,20 +471,49 @@ class Structurer:
         self._bonus, self._bonus_title = None, ""
 
     # ── ① 논점 윤곽 띠 ───────────────────────────────────────────
-    def _is_outline(self, text: str) -> bool:
-        if len(text) > 60:
-            return False
-        items = [t.strip() for t in re.split(self._outline["separator"], text) if t.strip()]
-        if len(items) < int(self._outline["min_items"]):
-            return False
+    def _outline_items(self, text: str) -> list[str]:
+        """'& 의의 - 소송물 - 중복소제기 - 시효중단 - 기판력' 같은 띠를 가른다.
+
+        아는 낱말 수만으로 판정하면 교재마다 어휘가 달라 놓친다. 그래서 모양
+        (짧은 토막 여럿이 구분자로 이어지고 문장으로 끝나지 않는다)을 먼저 보고,
+        아는 낱말이 하나라도 있는지로 확인한다.
+        """
+        body = text.strip()
+        if len(body) > 60 or _SENT_END.search(body):
+            return []
+        lead = self._outline.get("lead_marker")
+        marked = False
+        if lead:
+            body, n = re.subn(lead, "", body)
+            marked = bool(n) and body != text.strip()
+        items = [t.strip() for t in re.split(self._outline["separator"], body) if t.strip()]
+        # 표지(◎ & ※)가 붙어 있으면 토막이 둘뿐이어도 띠다. 실측
+        # '◎ 의의-내용' 이 셋이 아니라는 이유로 띠가 아니게 되어, 절 제목으로
+        # 승격되고 그 논점의 목차가 통째로 사라졌다.
+        least = int(self._outline.get("min_items_marked", 2) if marked
+                    else self._outline["min_items"])
+        if len(items) < least:
+            return []
+        if any(len(t) > int(self._outline.get("max_item_len", 10)) for t in items):
+            return []
         keys = set(self._outline["keywords"])
-        return sum(1 for t in items if t in keys) >= int(self._outline["min_items"])
+        known = sum(1 for t in items if t in keys)
+        if known < int(self._outline.get("min_known", 1)):
+            # 표지(◎ & ※)가 붙고 토막이 넉넉하면 아는 낱말을 요구하지 않는다.
+            # 낱말 목록은 교재마다 다르다. 실측 '◎ 개시 – 진행 – 종결 – 재개'
+            # 는 넷 다 목록에 없어서 띠가 아니라고 판정됐고, 그 논점의 절
+            # 다섯이 통째로 근거를 잃었다. 표지는 저자가 찍은 것이라 목록보다
+            # 확실한 증거다.
+            if not (marked and len(items) >= int(self._outline["min_items"])):
+                return []
+        return items
 
     # ── 블록 만들기 ──────────────────────────────────────────────
     def _mk(self, kind, text, level=0, page=0, meta=None) -> Block:
         return Block(kind=kind, text=text, level=level, page=page,
                      cases=_case_entries(self.pat, self._label_rx, text),
                      mnemonics=self.pat.find_mnemonics(text),
+                     articles=self.pat.find_articles(text),
                      meta=meta or {})
 
 
@@ -338,6 +543,13 @@ def _label_of(label_rx: re.Pattern, chunk: str) -> str:
         return ""
     head = re.split(r"[\[(（.]", chunk[m.end():], 1)[0].strip()
     return head if 0 < len(head) <= 12 else ""
+
+
+_EMPH_RUN = re.compile(r"==([^=\n]{1,300})==")
+
+
+def _emphasised_chars(text: str) -> int:
+    return sum(len(m.group(1).strip()) for m in _EMPH_RUN.finditer(text))
 
 
 def _strip_markup(text: str) -> str:
@@ -382,15 +594,23 @@ def _split_score(rx: re.Pattern | None, text: str, limit: float = 50,
 
 
 def _inline(pat: Patterns, text: str) -> str:
-    """두문자를 백틱으로 감싼다 (§6.1). 두 번 감싸지 않는다."""
-    def repl(m: re.Match) -> str:
-        if not pat.is_mnemonic_body(m.group("body")):
-            return m.group(0)
-        s, e = m.start(), m.end()
-        if text[max(0, s - 1):s] == "`" and text[e:e + 1] == "`":
-            return m.group(0)
-        return f"`{m.group(0)}`"
-    return pat.mnemonic.sub(repl, text)
+    """두문자를 백틱으로 감싼다 (§6.1).
+
+    자리까지 보고 고른 것만 감싼다. 줄 맨 앞 대괄호는 ③ 판례 제목 라벨이라
+    두문자가 아니다. 두 번 감싸지 않는다.
+    """
+    spans = pat.mnemonic_spans(text)
+    if not spans:
+        return text
+    out, cursor = [], 0
+    for start, end, _ in spans:
+        if text[max(0, start - 1):start] == "`" and text[end:end + 1] == "`":
+            continue
+        out.append(text[cursor:start])
+        out.append(f"`{text[start:end]}`")
+        cursor = end
+    out.append(text[cursor:])
+    return "".join(out)
 
 
 def _join_lines(lines: list[str], mode: str) -> str:
@@ -409,8 +629,14 @@ def _join_lines(lines: list[str], mode: str) -> str:
         if head.endswith("-") and tail[:1].isascii():
             out = head[:-1] + tail
             continue
+        # 사건번호가 줄에서 끊긴 경우. 두 갈래로 끊긴다.
+        #   '74다' / '1557'      부호까지 오고 일련번호가 넘어감
+        #   '91'   / '다43176'   연도만 오고 부호부터 넘어감
         if re.search(r"\d{2,4}[가-힣]{1,2}$", head) and tail[:1].isdigit():
-            out = head + tail          # 사건번호가 줄에서 끊긴 경우
+            out = head + tail
+            continue
+        if re.search(r"(?<![0-9])\d{2,4}$", head) and re.match(r"[가-힣]{1,2}\d", tail):
+            out = head + tail
             continue
         if mode == "none" and _CJK.search(head[-1:] or "") and _CJK.search(tail[:1] or ""):
             out = head + tail

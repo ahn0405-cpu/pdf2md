@@ -18,12 +18,13 @@ import subprocess
 from collections import Counter
 from dataclasses import dataclass, field, asdict
 
-from .color import Palette, is_black, to_rgb
+from .color import (ImageColorSampler, Palette, is_black, page_image_dpi,
+                    to_hex, to_rgb)
 from .patterns import Patterns
 
 _HANJA = re.compile(r"[一-鿿豈-﫿]")
-_SIDE = re.compile(r"s[A-Z]-\d{1,3}")
-_SIDE_MERGED = re.compile(r"s[A-Z]-\d{3,}|s[A-Z]-\d{1,2}\s*\d")
+_SIDE = re.compile(r"[sS][A-Z]-\d{1,4}")
+_SIDE_MERGED = re.compile(r"[sS][A-Z]-\d{3,}|[sS][A-Z]-\d{1,2}\s*\d")
 _EXAM = re.compile(r"\((\d{2})\)")
 _CHECK = re.compile(r"☑")
 _PROBLEM = re.compile(r"^\s*([A-Z])\s*-\s*(\d+)\s*\.", re.M)
@@ -67,8 +68,14 @@ def run(pdf_path: str, cfg: dict, sample: int = 24, layout_pages: int = 3,
     footnote_numbers: list[int] = []
     exam_years: Counter = Counter()
     problems: Counter = Counter()
+    side_all: list = []
     bonus = 0
     sizes: Counter = Counter()
+    draw_colors: Counter = Counter()
+    image_count: Counter = Counter()
+    image_dpis: list[float] = []
+    coverage: list[float] = []
+    span_boxes: dict[int, list] = {}
 
     for i in scan:
         page = doc[i]
@@ -87,6 +94,32 @@ def run(pdf_path: str, cfg: dict, sample: int = 24, layout_pages: int = 3,
         for s in spans:
             palette.add(to_rgb(s.get("color", 0)), s["text"], i + 1)
             sizes[round(s["size"] * 2) / 2] += len(s["text"].strip())
+        if len(span_boxes) < 6:
+            span_boxes[i] = [(s["bbox"], s["text"]) for s in spans][:400]
+
+        # 스캔본인지 본다. 쪽을 거의 덮는 그림이 있으면 종이를 찍은 것이다.
+        area = page.rect.width * page.rect.height
+        biggest = 0.0
+        for block in d["blocks"]:
+            if block.get("type") == 1:
+                x0, y0, x1, y1 = block["bbox"]
+                biggest = max(biggest, abs((x1 - x0) * (y1 - y0)) / area)
+        image_count[len(page.get_images())] += 1
+        coverage.append(round(biggest, 3))
+        native = page_image_dpi(page)
+        if native:
+            image_dpis.append(native)
+
+        # 옆번호는 조판 상세 3쪽만 보면 놓친다. 표본 전체에서 찾는다 (§4.3).
+        margin_x = page.rect.width * float(cfg["legend"]["sidenote"]["margin_ratio"])
+        for block in d["blocks"]:
+            if block.get("type") != 0:
+                continue
+            for line in block.get("lines", []):
+                t = "".join(sp["text"] for sp in line.get("spans", [])).strip()
+                if t and _SIDE.fullmatch(t):
+                    side_all.append((i + 1, t, round(line["bbox"][0] / page.rect.width, 2),
+                                     line["bbox"][0] >= margin_x))
 
         stars += len(pat.case_star.findall(text))
         for m in pat.mnemonic.finditer(text):
@@ -95,10 +128,38 @@ def run(pdf_path: str, cfg: dict, sample: int = 24, layout_pages: int = 3,
         for m in _EXAM.finditer(text):
             exam_years[m.group(1)] += 1
         bonus += len(_CHECK.findall(text))
+        # 색이 글자에 없으면 형광펜(칠한 네모)일 수 있다. 도형도 함께 본다.
+        # get_drawings 는 무거워서 앞쪽 표본 몇 쪽만 본다.
+        if len(draw_colors) < 40 and scan.index(i) < 8:
+            for dr in page.get_drawings():
+                for key in ("fill", "color"):
+                    col = dr.get(key)
+                    if not col:
+                        continue
+                    rgb = tuple(int(round(c * 255)) for c in col[:3])
+                    if rgb == (255, 255, 255) or is_black(rgb, color_cfg):
+                        continue
+                    draw_colors[to_hex(rgb)] += 1
         for m in _PROBLEM.finditer(text):
             problems[f"{m.group(1)}-{m.group(2)}"] += 1
 
     body_size = sizes.most_common(1)[0][0] if sizes else 10.0
+    image_dpi = sorted(image_dpis)[len(image_dpis) // 2] if image_dpis else 0.0
+
+    # 글자에 색이 없고 쪽이 그림으로 덮여 있으면, 색은 그림에만 남아 있다 (§2.4).
+    image_palette = Palette(cfg=color_cfg)
+    color_source = "span"
+    max_cov = max(coverage) if coverage else 0.0
+    if palette.colored_spans == 0 and max_cov >= 0.5:
+        color_source = "image"
+        for i, boxes in span_boxes.items():
+            sampler = ImageColorSampler(doc[i], color_cfg)
+            for bbox, text in boxes:
+                hexed, _, _ = sampler.classify(bbox)
+                image_palette.total_spans += 1
+                if hexed:
+                    rgb = tuple(int(hexed[j:j + 2], 16) for j in (1, 3, 5))
+                    image_palette.add(rgb, text, i + 1)
 
     # ── 조판 상세는 표본 3쪽만 (§3.1 2) ──────────────────────────
     detail = [i for i in layout_range if 0 <= i < n] if layout_range \
@@ -131,18 +192,33 @@ def run(pdf_path: str, cfg: dict, sample: int = 24, layout_pages: int = 3,
         "parser_key": key,
         "parser_order": cfg["parsers"]["by_diagnosis"].get(key, []),
         "profile_hint": "textbook",
+        "images": {
+            "per_page": image_count.most_common(5),
+            "dpi": image_dpi,
+            "max_coverage": max_cov,
+            "scanned_with_text_layer": max_cov >= 0.5 and not scanned,
+        },
         "color": {
+            "source": color_source,
             "span_rgb_available": palette.total_spans > 0,
             "total_spans": palette.total_spans,
             "colored_spans": palette.colored_spans,
             "distinct_colors": colors,
+            "image_sampled_spans": image_palette.total_spans,
+            "image_colored_spans": image_palette.colored_spans,
+            "image_palette": [{"hex": k, "spans": c, "chars": image_palette.chars[k],
+                               "samples": image_palette.samples[k]}
+                              for k, c in image_palette.ordered()],
             "palette": [{"hex": k, "spans": c, "chars": palette.chars[k],
                          "samples": palette.samples[k]} for k, c in palette.ordered()],
+            "drawing_colors": draw_colors.most_common(8),
         },
         "sidenote": {
-            "found": sum(len(p.sidenotes) for p in per_page),
+            "found": sum(1 for _, _, _, in_margin in side_all if in_margin),
+            "found_anywhere": len(side_all),
             "merged_suspect": [s for p in per_page for s in p.sidenote_merged],
-            "samples": [s for p in per_page for s in p.sidenotes][:10],
+            "samples": [t for _, t, _, _ in side_all][:12],
+            "x_ratios": sorted({r for _, _, r, _ in side_all})[:8],
         },
         "cases": {
             "samples": [c for p in per_page for c in p.cases][:12],
@@ -335,9 +411,27 @@ def report(d: dict, cfg: dict) -> str:
     a(f"- 표본 내 별표(`*`) 붙은 사건번호: {d['cases']['stars_in_sample']}건")
     a("")
 
+    img = d.get("images", {})
+    if img:
+        a("## 2-1) 쪽 그림 (스캔본 판별)")
+        a("")
+        a(f"- 쪽을 덮는 그림의 최대 비율: **{img['max_coverage']:.0%}**")
+        a(f"- 쪽당 그림 수: " + ", ".join(f"{k}장×{v}쪽" for k, v in img["per_page"][:4]))
+        if img.get("dpi"):
+            a(f"- 그림 해상도: **{img['dpi']:.0f} dpi** "
+              f"(색은 이 해상도에 맞춰 읽는다, §2.4)")
+        if img.get("scanned_with_text_layer"):
+            a("")
+            a("- ⚠️ **종이를 스캔한 그림 위에 OCR 텍스트가 얹힌 PDF다.**")
+            a("  - 글자 색은 전부 검정이 된다. 저자가 칠한 강조색은 그림에만 남는다(§2.4).")
+            a("  - 추출 글자에 OCR 오인식(`＜`, `2010^99040`)이 섞인다(§4.6).")
+            a("  - 파서를 바꿔도 이 오인식은 그대로다. 정규화(§4)로 되돌린다.")
+        a("")
+
     a("## 3) 색상 추출 (§3.1-3, §2.4)")
     a("")
     c = d["color"]
+    a(f"- 색을 읽은 곳: **{'쪽 그림(픽셀)' if c.get('source') == 'image' else '글자(span)'}**")
     a(f"- span 단위 RGB: {'**나온다**' if c['span_rgb_available'] else '안 나온다'}")
     a(f"- 전체 span {c['total_spans']:,} 중 유채색 {c['colored_spans']:,}")
     a(f"- 병합 후 색상 종류: **{c['distinct_colors']}종**")
@@ -348,21 +442,55 @@ def report(d: dict, cfg: dict) -> str:
         for p in c["palette"][:6]:
             ex = p["samples"][0][1] if p["samples"] else ""
             a(f"| `{p['hex']}` | {p['spans']:,} | {p['chars']:,} | {ex[:40]} |")
+    if c.get("source") == "image":
+        a("")
+        a(f"- 쪽 그림에서 다시 본 결과: 글자상자 {c['image_sampled_spans']:,}개 중 "
+          f"**유채색 {c['image_colored_spans']:,}개**")
+        if c.get("image_palette"):
+            a("")
+            a("| 색 | 글자상자 | 예문 |")
+            a("|---|---:|---|")
+            for pal in c["image_palette"][:6]:
+                ex = pal["samples"][0][1] if pal["samples"] else ""
+                a(f"| `{pal['hex']}` | {pal['spans']:,} | {ex[:44]} |")
+            a("")
+            a("- ✅ **강조색이 그림에 남아 있다.** `preserve.color.source: auto` 가 "
+              "이 경로를 자동으로 탄다. §2.4 보존 가능.")
+        else:
+            a("")
+            a("- ⚠️ 그림에서도 유채색을 못 찾았다. 흑백 스캔이거나 임계값이 안 맞는다. "
+              "`preserve.color.chroma_min` 을 낮춰 보고, `convert probe --page N` 으로 "
+              "그 쪽을 직접 볼 것.")
+    if c.get("drawing_colors"):
+        a("")
+        a("- 도형(형광펜·밑줄·테두리) 유채색: " +
+          ", ".join(f"`{h}`×{n}" for h, n in c["drawing_colors"][:6]))
     if c["distinct_colors"] > 1:
         a("")
         a("- ⚠️ 색이 2종 이상이다. `_reports/palette.md` 를 보고 **사람이** 병합 기준을 "
           "정할 것 (§2.4). 자동 판정하지 않는다.")
-    elif c["distinct_colors"] == 0:
+    elif c["distinct_colors"] == 0 and not c.get("image_colored_spans"):
         a("")
-        a("- ⚠️ 유채색이 없다. 강조색이 없는 판본이거나 색이 소실됐다. §5.4 WARN 대상.")
+        if c.get("drawing_colors"):
+            a("- ⚠️ **글자 색으로는 강조가 없다. 다만 도형에 색이 있다** — 강조가 "
+              "글자색이 아니라 형광펜(칠한 네모)일 수 있다. "
+              "`convert probe <pdf>` 로 확인할 것.")
+        else:
+            a("- ⚠️ 유채색이 글자에도 도형에도 없다. 강조색이 없는 판본이거나 색이 "
+              "소실됐다(압축본이면 그럴 수 있다). §5.4 WARN 대상. "
+              "`convert probe <pdf>` 로 원문을 직접 확인할 것.")
     a("")
 
     a("## 4) 우측 여백 옆번호 (§3.1-4, §4.3)")
     a("")
     sd = d["sidenote"]
-    a(f"- 여백에서 찾은 `sE-n` 꼴: {sd['found']}건")
+    a(f"- 여백에서 찾은 `sE-n` 꼴: {sd['found']}건 "
+      f"(자리를 가리지 않으면 {sd.get('found_anywhere', sd['found'])}건)")
     if sd["samples"]:
         a(f"  - 표본: {', '.join('`' + s + '`' for s in sd['samples'])}")
+    if sd.get("x_ratios"):
+        a(f"  - 쪽폭 대비 x: {', '.join(str(r) for r in sd['x_ratios'])} "
+          f"(`legend.sidenote.margin_ratio` 보다 커야 여백으로 잡힌다)")
     if sd["merged_suspect"]:
         a("- ⚠️ **본문과 병합 의심** (sE-8 + 1. → sE-81):")
         for s in sd["merged_suspect"][:6]:

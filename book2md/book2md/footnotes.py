@@ -18,7 +18,11 @@ from dataclasses import dataclass, field
 from .model import Page
 from .patterns import Patterns
 
-_NUM_HEAD = re.compile(r"^(\d{1,4})\s*[).\]]?\s+(\S.*)$")
+# 각주 정의 줄. 이 교재의 OCR 은 '270） 시효중단…' / '264 종전…' 두 꼴로 낸다.
+# 구분자에 '.' 을 넣지 않는다. 넣으면 '2011. 4. 26.' 이 각주 2011번이 돼 버린다.
+# 본문 첫 글자로 문장부호를 받지 않는 것도 같은 이유다.
+_NUM_HEAD = re.compile(
+    r"^(?P<n>\d{1,4})\s*(?P<sep>[)\]）])?\s*(?P<body>[^\s.,)\]].*)$")
 _SENT_END = ("다.", "다).", "함.", "음.", "요.", ".", "」", "’", '"', ")")
 
 
@@ -45,11 +49,14 @@ class FootnoteCollector:
     def __init__(self, cfg: dict, pat: Patterns):
         self.pat = pat
         fn = cfg["preserve"]["footnote"]
+        self.bottom_zone = float(fn.get("bottom_zone", 0.42))
         self.lo = int(fn.get("number_min", 1))
         self.hi = int(fn.get("number_max", 4000))
         self.tail_lines = int(fn.get("markdown_tail_lines", 12))
         self.inline_from_numbers = bool(fn.get("inline_ref_from_numbers", True))
         self.state = FootnoteState()
+        #: 최근 쪽들에서 확정된 각주 번호. 참조가 정의보다 한 쪽 앞서기도 한다.
+        self.recent: list[list[int]] = []
 
     # ── 페이지 처리 ──────────────────────────────────────────────
     def process(self, page: Page) -> list[Footnote]:
@@ -58,8 +65,11 @@ class FootnoteCollector:
         page.lines 는 본문만 남는다(각주 줄은 빠진다).
         """
         zone = [l for l in page.lines if l.zone == "footnote"]
-        if not zone and page.kind != "layout":
-            zone = self._guess_zone(page)
+        # 크기로 잡은 영역이 있어도, 번호로 찾은 시작점이 더 위면 그쪽을 쓴다.
+        # 각주 안에서 글자 크기가 흔들려 위쪽 몇 줄이 잘려 나가기 때문이다.
+        guessed = self._guess_zone(page)
+        if guessed and (not zone or guessed[0].y0 < zone[0].y0):
+            zone = guessed
         if not zone:
             body = [l for l in page.lines if l.zone in ("body", "header")]
             self._inline_refs(page, body, [])
@@ -70,6 +80,8 @@ class FootnoteCollector:
         body = [l for l in page.lines if id(l) not in marked and l.zone != "header"]
 
         found = self._parse_zone(zone, page.number)
+        self.recent.append([f.number for f in found])
+        self.recent = self.recent[-3:]
         self._inline_refs(page, body, found)
         page.lines = body
         return found
@@ -88,8 +100,8 @@ class FootnoteCollector:
             text = line.stripped
             if not text:
                 continue
-            m = _NUM_HEAD.match(text)
-            n = int(m.group(1)) if m else None
+            m = _num_head(text)
+            n = int(m.group("n")) if m else None
             starts_new = (
                 m is not None
                 and self.lo <= n <= self.hi
@@ -98,7 +110,7 @@ class FootnoteCollector:
             if starts_new:
                 if current:
                     found.append(current)
-                current = Footnote(number=n, text=m.group(2).strip(), page=page_no)
+                current = Footnote(number=n, text=m.group("body").strip(), page=page_no)
                 self.state.last_number = n
                 self.state.pending = None
                 continue
@@ -121,16 +133,26 @@ class FootnoteCollector:
 
     # ── 좌표가 없을 때 각주 영역 추정 ─────────────────────────────
     def _guess_zone(self, page: Page):
+        """번호로 시작하는 줄부터 쪽 끝까지를 각주로 본다.
+
+        스캔본 OCR 은 각주 안에서도 글자 크기가 7.2~8.0 으로 흔들린다. 크기만
+        보고 아래에서 위로 올라가면 중간의 큰 줄에서 끊겨 264·265 번을 통째로
+        놓친다. 좌표가 있으면 쪽 아래쪽 전체를 훑어 **가장 위쪽** 후보를 잡는다.
+        """
         lines = [l for l in page.lines if l.stripped]
         if not lines:
             return []
-        tail = lines[-self.tail_lines:]
+        if page.kind == "layout" and page.height:
+            limit = page.height * (1.0 - self.bottom_zone)
+            tail = [l for l in lines if l.y0 >= limit and l.zone != "header"]
+        else:
+            tail = lines[-self.tail_lines:]
         start = None
         for k, line in enumerate(tail):
-            m = _NUM_HEAD.match(line.stripped)
+            m = _num_head(line.stripped)
             if not m:
                 continue
-            n = int(m.group(1))
+            n = int(m.group("n"))
             if not (self.lo <= n <= self.hi and n > self.state.last_number):
                 continue
             # 뒤로 이어지는 줄들이 각주다운지 본다: 번호가 오르거나 이어지는 문장
@@ -147,9 +169,9 @@ class FootnoteCollector:
     def _tail_is_footnotes(self, block) -> bool:
         numbers = []
         for line in block:
-            m = _NUM_HEAD.match(line.stripped)
+            m = _num_head(line.stripped)
             if m:
-                numbers.append(int(m.group(1)))
+                numbers.append(int(m.group("n")))
         if not numbers:
             return False
         if numbers != sorted(numbers):
@@ -164,9 +186,13 @@ class FootnoteCollector:
         아무 숫자나 참조로 바꾸지 않는다. 그 페이지(또는 바로 앞)에서 실제로
         정의를 본 번호만 바꾼다. 사건번호·연도·조문 번호는 건드리지 않는다.
         """
-        if page.kind == "layout" or not self.inline_from_numbers:
+        if not self.inline_from_numbers:
             return
-        numbers = sorted({f.number for f in found}, reverse=True)
+        # 이 쪽에서 정의된 번호가 우선이지만, 앞 두 쪽 것도 함께 본다.
+        # 각주가 쪽을 넘어 이어지면 참조가 정의보다 앞 쪽에 남는다.
+        pool = {n for chunk in self.recent for n in chunk}
+        pool |= {f.number for f in found}
+        numbers = sorted(pool, reverse=True)
         if not numbers:
             return
         for line in body:
@@ -175,10 +201,20 @@ class FootnoteCollector:
                 continue
             guard = _protected_spans(self.pat, text)
             for n in numbers:
-                pat = re.compile(rf"(?<=[가-힣\)\]』」.])({n})(?![\d])")
+                if f"[^{n}]" in text:
+                    continue                    # 파서가 위첨자로 이미 살렸다
+                # 위첨자가 본문에 'NNN)' 꼴로 떨어진다. **닫는 괄호를 반드시
+                # 요구한다.** 맨 숫자까지 잡으면 '제38조 1항' 의 1 이 [^1] 이 되고,
+                # '제1심', '2020. 1. 16' 도 줄줄이 망가진다.
+                # 조문·차수 뒤 숫자도 앞글자로 한 번 더 막는다.
+                # 참조는 앞말에 **붙어서** 온다: '…판시한다.264)', '…제외265)하였다면'.
+                # 앞이 여는 괄호나 공백이면 목록 번호다('(1) 학설', '제38조 1항').
+                # 그걸 참조로 바꾸면 조문과 설문 번호가 통째로 망가진다.
+                pat = re.compile(
+                    rf"(?<=[가-힣一-鿿.\)\]])({n})[)）](?![\d])")
                 out, cursor = [], 0
                 for m in pat.finditer(text):
-                    if any(a <= m.start() < b for a, b in guard):
+                    if any(a <= m.start(1) < b for a, b in guard):
                         continue
                     out.append(text[cursor:m.start()])
                     out.append(f"[^{n}]")
@@ -208,3 +244,13 @@ def _join(head: str, tail: str) -> str:
     if head.endswith("-"):
         return head[:-1] + tail
     return head + " " + tail
+
+
+def _num_head(text: str):
+    """각주 정의 줄인가. 숫자만 있는 줄(쪽번호)은 아니다."""
+    m = _NUM_HEAD.match(text)
+    if not m:
+        return None
+    if m.group("sep") is None and not re.match(r"^\d{1,4}\s", text):
+        return None            # 번호와 본문 사이에 공백이 있어야 한다
+    return m
