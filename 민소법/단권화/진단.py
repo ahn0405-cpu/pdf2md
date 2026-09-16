@@ -10,10 +10,11 @@ for p in files:
     # 대법원/법원의 결단 — 이유 접속어가 없는 것
     결단 = [i for i,l in enumerate(L) if re.search(r'\*\*(대법원|법원)의 결단\*\*', l)]
     무이유 = 0
+    벗김 = lambda l: re.sub(r'^[>\s]*>', '', l) if l.lstrip().startswith('>') else l
     for i in 결단:
         blk = L[i]
         j = i+1
-        while j < len(L) and L[j].startswith('  ') and not re.match(r'\s*-\s\*\*', L[j]):
+        while j < len(L) and 벗김(L[j]).startswith('  ') and not re.match(r'\s*-\s\*\*', 벗김(L[j])):
             blk += ' ' + L[j].strip(); j += 1
         if not re.search(r'때문|이므로|이기에|므로|까닭|이유|아니므로|되므로|하므로', blk):
             무이유 += 1
@@ -22,13 +23,16 @@ for p in files:
     한줄 = 0
     for i in 취지:
         j=i+1; n=1
-        while j<len(L) and L[j].startswith('  ') and not re.match(r'\s*-\s\*\*', L[j]):
+        while j<len(L) and 벗김(L[j]).startswith('  ') and not re.match(r'\s*-\s\*\*', 벗김(L[j])):
             n+=1; j+=1
         if n <= 1: 한줄 += 1
     # 판시 안 BOLD 15자 초과
-    판시=[]
+    판시=[]; 기준=0
+    깊이 = lambda l: len(re.findall(r'>', l[:len(l)-len(re.sub(r'^[>\s]*','',l))]))
     for line in L:
-        q = line.lstrip().startswith('>') and not line.lstrip().lstrip('>').lstrip().startswith('|')
+        알맹이 = re.sub(r'^[>\s]*','',line)
+        if 알맹이.startswith('#'): 기준 = 깊이(line)   # 헤딩의 깊이가 그 절의 바탕
+        q = 깊이(line) > 기준 and not 알맹이.startswith('|')
         판시.extend([q]*(len(line)+1))
     초과 = sum(1 for m in re.finditer(r'\*\*(.+?)\*\*', s, re.S)
                if m.start()<len(판시) and 판시[m.start()]

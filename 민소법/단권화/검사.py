@@ -17,9 +17,14 @@ def bold_too_long(path, limit=15):
     시작줄[len(s)] = n
     # 암기노트는 **판시 원문에서만** 빈칸을 뽑는다(samples/암기노트 머리말).
     # 해설 본문의 강조는 빈칸이 되지 않으므로 자수 규칙의 대상이 아니다.
-    판시 = []
+    # ☑ 박스로 감싼 절은 전체가 `>`이므로, 그 안의 판시는 인용이 한 단 더 깊다.
+    # 헤딩의 인용 깊이를 그 절의 바탕으로 삼고 그보다 깊은 줄만 판시로 본다.
+    판시 = []; 기준 = 0
+    깊이 = lambda l: l[:len(l) - len(re.sub(r'^[>\s]*', '', l))].count('>')
     for line in s.split('\n'):
-        q = line.lstrip().startswith('>') and not line.lstrip().lstrip('>').lstrip().startswith('|')
+        알맹이 = re.sub(r'^[>\s]*', '', line)
+        if 알맹이.startswith('#'): 기준 = 깊이(line)
+        q = 깊이(line) > 기준 and not 알맹이.startswith('|')
         판시.extend([q] * (len(line) + 1))
     hits = []
     for m in re.finditer(r'\*\*(.+?)\*\*', s, re.S):
