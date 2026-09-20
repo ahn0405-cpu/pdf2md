@@ -19,6 +19,7 @@ class Patterns:
     case: re.Pattern              # 사건번호
     case_loose: re.Pattern        # 공백이 낀 사건번호까지 (정규화 전 원문용)
     case_star: re.Pattern         # 사건번호 + 별표
+    case_star_loose: re.Pattern   # 공백이 낀 것까지 (정규화 전 원문 대조용)
     mnemonic: re.Pattern          # 두문자 [일나시 나소시]
     mnemonic_like: re.Pattern     # 괄호 종류를 가리지 않는 두문자 모양
     date: re.Pattern              # 2011. 4. 26.
@@ -32,6 +33,10 @@ class Patterns:
     year_max: int
     deny_words: tuple
     mnemonic_max_len: int
+    label_at_line_start: bool
+    mnemonic_unclosed: re.Pattern
+    mnemonic_article: re.Pattern   # 두문자로 오인된 조문번호
+    article_cite: re.Pattern       # 제265조 / 제218조 제1항
 
     @classmethod
     def build(cls, cfg: dict) -> "Patterns":
@@ -44,33 +49,86 @@ class Patterns:
 
         # 사건번호: 연도(2~4자리) + 부호 + 일련번호.
         # 앞뒤에 숫자·한글이 붙으면 사건번호가 아니다(제2019조, 2019다음 등).
+        # 통화·수량 표기가 사건번호로 오인되는 것을 막는다.
+        # '1,000만 원' 이 '1,000므1 원' 으로 흘러나오면 '000므1' 이 잡힌다.
         case = re.compile(
-            rf"(?<![0-9A-Za-z])(?P<year>\d{{2,4}})(?P<suffix>{suffixes})(?P<serial>\d+)"
-            rf"(?![0-9])(?!호선|번지)"
+            rf"(?<![0-9A-Za-z,])(?P<year>\d{{2,4}})(?P<suffix>{suffixes})(?P<serial>\d+)"
+            rf"(?![0-9])(?!호선|번지)(?!\s*(?:원|만|억|천|백|명|개|건|쪽|년|월|일)\b)"
+            rf"(?!\s*원)"
         )
         # 원문에는 '91 다 43695' 처럼 공백이 낀다. 정규화가 이걸 붙인다.
         case_loose = re.compile(
-            rf"(?<![0-9A-Za-z])(?P<year>\d{{2,4}})\s*(?P<suffix>{suffixes})\s*(?P<serial>\d+)"
-            rf"(?![0-9])"
+            rf"(?<![0-9A-Za-z,])(?P<year>\d{{2,4}})[ \t]*(?P<suffix>{suffixes})[ \t]*"
+            rf"(?P<serial>\d+)(?![0-9])(?!\s*원)"
         )
+        # 별표 하나만 센다. 마크다운 굵게(`**`)가 사건번호 뒤에 오면
+        # `91다43695**` 가 되어 별표로 오해된다. 원본에는 `**` 가 없으므로
+        # 변환본 쪽만 부풀어 개수 대조가 통째로 어긋난다.
         case_star = re.compile(
-            rf"(?<![0-9A-Za-z])\d{{2,4}}(?:{suffixes})\d+(?![0-9])\s{{0,{gap}}}{star_cls}"
+            rf"(?<![0-9A-Za-z])\d{{2,4}}(?:{suffixes})\d+(?![0-9])\s{{0,{gap}}}"
+            rf"(?<!\*){star_cls}(?!\*)"
+        )
+
+        # 원본(정규화 전)에는 '91 다43176*' 처럼 공백이 낀다. 엄격한 패턴으로
+        # 원본을 세면 그만큼 적게 잡혀, 변환본이 늘어난 것처럼 보인다.
+        # 줄바꿈은 허용하지 않는다. 정규화는 한 줄 안에서만 공백을 없앨 수
+        # 있으므로, 줄을 넘어 끊긴 것까지 원본에서 세면 변환본이 모자란 것처럼
+        # 보인다.
+        case_star_loose = re.compile(
+            rf"(?<![0-9A-Za-z,])\d{{2,4}}[ \t]*(?:{suffixes})[ \t]*\d+(?![0-9])"
+            rf"[ \t]{{0,{gap}}}(?<!\*){star_cls}(?!\*)"
         )
 
         mn = pre["mnemonic"]
-        tok = rf"[가-힣]{{{mn['token_min']},{mn['token_max']}}}"
+        # 두문자 안에는 숫자가 섞이기도 한다([송완불2괴]). 다만 숫자만인 덩어리는
+        # 두문자가 아니므로 한글이 한 자 이상 있어야 한다.
+        tok = (rf"(?=[가-힣0-9]{{{mn['token_min']},{mn['token_max']}}})"
+               rf"[가-힣0-9]*[가-힣][가-힣0-9]*")
         inner = rf"{tok}(?:\s{tok}){{0,{max(0, mn['max_tokens'] - 1)}}}"
         # [^264] 는 '^' 때문에 걸리지 않는다. [텍스트](주소) 는 뒤의 '(' 로 걸러낸다.
-        mnemonic = re.compile(rf"\[(?P<body>{inner})\](?![(:])")
-        opens = "".join(a for a, _ in nrm["mnemonic_brackets"]) + "["
-        closes = "".join(b for _, b in nrm["mnemonic_brackets"]) + "]"
+        # 전각 대괄호도 함께 받는다. 정규화 전 원문(진단·probe)에도 쓰이기 때문이다.
+        mnemonic = re.compile(rf"[\[［](?P<body>{inner})[\]］](?![(:])")
+        # OCR 은 여는 괄호와 닫는 괄호를 서로 다른 글자로 흘린다: ［…】, 【…］, ｛…】.
+        # 그래서 짝을 맞추지 않고, 안쪽이 두문자 모양이면 받아들인다.
+        opens = "".join(a for a, _ in nrm["mnemonic_brackets"]) + "[［"
+        closes = "".join(b for _, b in nrm["mnemonic_brackets"]) + "]］"
+        # 강조 표시가 두문자와 닫는 괄호 사이에 끼기도 한다: `[일외별명일==】`.
+        # 색을 먼저 입히고 정규화가 나중에 돌기 때문이다. 표시는 살려 뒤로 옮긴다.
         mnemonic_like = re.compile(
-            rf"(?P<open>[{re.escape(opens)}])(?P<body>{inner})(?P<close>[{re.escape(closes)}])(?![(:])"
+            rf"(?P<open>[{re.escape(opens)}])(?P<body>{inner})"
+            rf"(?P<mid>(?:==|\*\*)?)(?P<close>[{re.escape(closes)}])(?![(:])"
+        )
+        # 닫는 괄호를 통째로 흘린 경우: `(1) 원칙 ［일나시 나소시`(줄 끝).
+        # 줄 끝에 강조 마크업(==, **)이 붙어 있을 수 있다. 파서가 색을 먼저
+        # 입히고 그다음에 정규화가 돌기 때문이다.
+        mnemonic_unclosed = re.compile(
+            rf"(?P<open>[{re.escape(opens)}])(?P<body>{inner})\s*(?P<tail>(?:==|\*\*)?)\s*$"
         )
 
         date = re.compile(r"(?<!\d)(?P<y>\d{4})\.\s*(?P<m>\d{1,2})\.\s*(?P<d>\d{1,2})\.?")
         units = _alt(nrm["article_units"])
         article = re.compile(rf"제\s+(?P<num>\d+)\s*(?P<unit>{units})(?![가-힣])")
+        # 대괄호 안이 조문번호면 두문자가 아니다 (§P1-2). 두문자는 답안에
+        # 그대로 옮겨 적는 암기 문자열이라, 조문번호가 섞이면 뒤 AI 가 그것을
+        # 암기 대상으로 오해한다.
+        mnemonic_article = re.compile(
+            mn.get("article_pattern", r"^제?\s*\d+\s*조"))
+        # 프론트매터 articles: 용. 본문에 인용된 조문을 그대로 모은다.
+        #
+        # 한 법만 다루는 교재(민소법)는 법령명이 필요 없다. 특허법 교재처럼
+        # 특허법·실용신안법·디자인보호법이 한 쪽에 섞이면 '제29조' 만으로는
+        # 어느 법의 조문인지 정해지지 않는다. preserve.article.law_names 에
+        # 법령명을 적어 두면 조문 앞에 **붙어 있을 때만** 함께 싣는다.
+        # 앞 문단의 법령명을 이어 붙이지는 않는다 — 그건 원문에 없는 것을
+        # 지어내는 일이다(§4.8).
+        art_body = r"제\s*\d+\s*조(?:의\s*\d+)?(?:\s*제?\s*\d+\s*[항호목])*"
+        law_names = (pre.get("article") or {}).get("law_names") or []
+        if law_names:
+            # '구 특허법 제29조' 의 '구' 는 개정 전 법이라 조문 내용이 다르다.
+            article_cite = re.compile(
+                rf"(?P<law>(?:구\s*)?(?:{_alt(law_names)})\s*)?(?P<art>{art_body})")
+        else:
+            article_cite = re.compile(art_body)
 
         fn = pre["footnote"]
         lo, hi = fn["number_min"], fn["number_max"]
@@ -80,6 +138,7 @@ class Patterns:
 
         return cls(
             case=case, case_loose=case_loose, case_star=case_star,
+            case_star_loose=case_star_loose,
             mnemonic=mnemonic, mnemonic_like=mnemonic_like,
             date=date, article=article,
             footnote_ref=footnote_ref, footnote_def=footnote_def,
@@ -88,7 +147,11 @@ class Patterns:
             known_suffixes=frozenset(pre["known_suffixes"]),
             year_min=int(pre["year_min"]), year_max=int(pre["year_max"]),
             deny_words=tuple(mn["deny_words"]),
-            mnemonic_max_len=int(mn.get("max_total_len", 9)),
+            mnemonic_max_len=int(mn.get("max_total_len", 10)),
+            label_at_line_start=bool(mn.get("label_at_line_start", True)),
+            mnemonic_unclosed=mnemonic_unclosed,
+            mnemonic_article=mnemonic_article,
+            article_cite=article_cite,
         )
 
     # ── 두문자 판정 ──────────────────────────────────────────────
@@ -103,11 +166,51 @@ class Patterns:
             return False
         if len(body) > self.mnemonic_max_len:
             return False
+        if self.mnemonic_article.match(body.strip()):
+            return False                 # 조문번호는 두문자가 아니다 (§P1-2)
         return not any(w in body for w in self.deny_words)
 
+    def mnemonic_spans(self, text: str) -> list[tuple[int, int, str]]:
+        """두문자의 (시작, 끝, 안쪽글자). 줄 단위 자리를 함께 본다.
+
+        ③ 판례 제목 라벨은 줄 맨 앞(목록 번호 뒤 포함)에 온다
+        (`1) [청구확장 취지 명백히 표시]`). ② 두문자는 문장 가운데 온다
+        (`(1) 원칙 [일나시 나소시]`). 길이만으로는 `[반복적 재심청구]` 같은
+        8자짜리 라벨을 못 가르므로 자리를 함께 본다.
+        """
+        out = []
+        offset = 0
+        for line in text.split("\n"):
+            for m in self.mnemonic.finditer(line):
+                body = m.group("body")
+                if not self.is_mnemonic_body(body):
+                    continue
+                if self.label_at_line_start and _looks_like_label(line, m.start(), m.end()):
+                    continue
+                out.append((offset + m.start(), offset + m.end(), body))
+            offset += len(line) + 1
+        return out
+
     def find_mnemonics(self, text: str) -> list[str]:
-        return [m.group("body") for m in self.mnemonic.finditer(text)
-                if self.is_mnemonic_body(m.group("body"))]
+        return [body for _, _, body in self.mnemonic_spans(text)]
+
+    def find_articles(self, text: str) -> list[str]:
+        """본문에 인용된 조문 (§P1-2). 글자는 손대지 않고 공백만 고른다."""
+        out = []
+        for m in self.article_cite.finditer(text):
+            # '제 174조' 와 '제174조' 가 따로 실리면 뒤 AI 가 다른 조문으로 읽는다.
+            # 조문 표기 안의 공백은 OCR 이 흘린 것이라 없앤다 (§P1-2).
+            gd = m.groupdict()
+            cite = re.sub(r"\s+", "", gd.get("art") or m.group(0))
+            cite = re.sub(r"(?<=[조항호목의])(?=제)", " ", cite)
+            law = gd.get("law")
+            if law:
+                law = re.sub(r"\s+", "", law)
+                law = re.sub(r"^구(?=.)", "구 ", law)
+                cite = f"{law} {cite}"
+            if cite not in out:
+                out.append(cite)
+        return out
 
     # ── 사건번호 판정 (§5.1) ─────────────────────────────────────
     def find_cases(self, text: str) -> list[re.Match]:
@@ -126,3 +229,27 @@ class Patterns:
         if not serial.isdigit() or serial.startswith("0"):
             bad.append(f"일련번호 '{serial}' 이 이상")
         return bad
+
+
+_LIST_LEAD = re.compile(
+    r"^\s*(?:[-•‣▪·]|\(?\s*\d{1,2}\s*[).]|[가-하]\s*[.)]|[①-⑳]|[ⅰ-ⅹIVXi]{1,4}\s*[).])?\s*$"
+)
+
+
+def _looks_like_label(line: str, start: int, end: int) -> bool:
+    """③ 판례 제목 라벨인가.
+
+    라벨은 줄 맨 앞에 서고, 목록 번호를 달거나 뒤에 설명이 이어진다.
+        1) [청구확장 취지 명백히 표시] 확장의 뜻을 밝힌 때…
+    두문자는 문장 가운데 오거나, 줄에 홀로 선다.
+        (1) 원칙 [일나시 나소시] 로 본다.
+        [확객시전]
+    그래서 '맨 앞'만으로는 가르지 않고, 번호가 붙었는지·뒤에 말이 이어지는지를
+    함께 본다.
+    """
+    head = line[:start]
+    if not _LIST_LEAD.match(head):
+        return False                      # 문장 가운데 = 두문자
+    has_marker = bool(head.strip())
+    has_tail = bool(line[end:].strip())
+    return has_marker or has_tail

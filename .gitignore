@@ -3,3 +3,9 @@ package-lock.json
 __pycache__/
 *.pyc
 out/
+
+# 변환 중간 파일 — 용량만 크고 다시 만들 수 있다
+_work/
+
+# 원본 PDF 는 리포에 넣지 않는다 (사장님 PC 에 있다)
+*.pdf

@@ -103,6 +103,29 @@ def _width(text, size):
     return font.text_length(text, size)
 
 
+def _place_ocr(page, x, y, shown, ocr, size):
+    """OCR 레이어를 종이의 낱말 자리에 공백 글자 없이 놓는다.
+
+    실물이 이 구조다. 공백 글자는 없고 낱말 사이가 벌어져만 있어서,
+    글자 간격을 보지 않으면 '수량적가분채권을' 처럼 붙어 나온다.
+    """
+    words = shown.split(" ")
+    flat = ocr.replace(" ", "")
+    cursor = x
+    taken = 0
+    for w in words:
+        n = len(w.replace(" ", ""))
+        chunk = flat[taken:taken + n] if taken < len(flat) else ""
+        taken += n
+        if chunk:
+            page.insert_text((cursor, y), chunk, fontname="wqy", fontsize=size,
+                             render_mode=3)
+        cursor += _width(w + " ", size)
+    if taken < len(flat):
+        page.insert_text((cursor, y), flat[taken:], fontname="wqy", fontsize=size,
+                         render_mode=3)
+
+
 # ── 기본서 ──────────────────────────────────────────────────────
 def textbook(path: Path, filler_pages: int = 6):
     doc = pymupdf.open()
@@ -220,10 +243,175 @@ def casebook(path: Path):
     doc.close()
 
 
+# ── 스캔본 + OCR 텍스트 레이어 ────────────────────────────────────
+# 실물 교재가 이 꼴이다. 종이를 찍은 그림 위에 OCR 글자가 보이지 않게 얹혀 있다.
+#   · 글자 색은 전부 검정 → 강조색은 그림 픽셀에만 남는다 (§2.4)
+#   · 여는 괄호가 ＜ 로 흘러나온다 (§2.1)
+#   · 닫는 대괄호가 통째로 빠진다 (§2.2)
+#   · 각주 참조가 위첨자가 아니라 'NNN)' 으로 떨어진다 (§2.5)
+def scanned_book(path: Path, pages: int = 6):
+    """여러 쪽짜리 스캔본. 쪽마다 되풀이되는 꼬리말이 있다.
+
+    실물처럼 꼬리말이 쪽번호만 바뀌고, 마지막 두 쪽만 다른 장으로 넘어간다.
+    이런 꼬리말이 장 제목으로 잡히면 문서 전체가 어긋난다(§4.1).
+    """
+    W, H, M = 470, 700, 46
+    doc = pymupdf.open()
+    for k in range(pages):
+        page_no = 152 + k
+        chapter = "05 | 소송물" if k < pages - 2 else "06 | 소송절차 개시"
+        # 홀짝으로 꼬리말 모양이 갈리는 것까지 실물과 같게 둔다
+        footer = (f"CHAPTER {chapter} · {page_no}" if k % 2
+                  else f"{page_no} · 윤곽 민사소송법")
+        rows = [
+            (70, M, f"0{40 + k} 논점 {k + 1}", BLUE),
+            (96, M, "I. 의의", BLACK),
+            (118, M, f"이 논점의 의의는 이러하다({70 + k}다{1000 + k}).", BLACK),
+        ]
+        paper = pymupdf.open()
+        sheet = paper.new_page(width=W, height=H)
+        sheet.insert_font(fontname="wqy", fontfile=FONT)
+        for y, x, text, color in rows:
+            sheet.insert_text((x, y), text, fontname="wqy", fontsize=9, color=color)
+        sheet.insert_text((M, 676), footer, fontname="wqy", fontsize=7.6, color=BLACK)
+        pix = sheet.get_pixmap(dpi=150)
+        paper.close()
+
+        out = doc.new_page(width=W, height=H)
+        out.insert_image(pymupdf.Rect(0, 0, W, H), pixmap=pix)
+        out.insert_font(fontname="wqy", fontfile=FONT)
+        for y, x, text, _ in rows:
+            _place_ocr(out, x, y, text, text.replace(" ", ""), 9)
+        out.insert_text((M, 676), footer.replace(" ", ""), fontname="wqy",
+                        fontsize=7.6, render_mode=3)
+    doc.save(str(path))
+    doc.close()
+
+
+def scanned_textbook(path: Path):
+    """(종이 모양, OCR 이 흘린 글자) 짝으로 스캔본을 짓는다.
+
+    실물에서 확인된 것을 그대로 재현한다.
+      · 낱말 사이 공백이 OCR 글자에 없다
+      · 번호와 제목이 다른 줄로 떨어진다 ('3' / '.判例[일외별명일]')
+      · 제목이 파란색이라 강조로 읽힌다
+      · 여는 괄호가 ＜, 닫는 대괄호가 사라짐
+      · 각주 참조가 'NNN)' 로 본문에 떨어짐
+      · ☑ 가 '0' 으로 읽힘
+      · 쪽 아래 꼬리말 '154•윤곽민사소송법'
+    """
+    W, H, M = 470, 700, 46
+    B = BLACK
+    # (y, x, 종이에 인쇄된 글자, 색, OCR 이 흘린 글자)
+    rows = [
+        (70,  M,      "046 일부청구", BLUE, "046일부청구"),
+        (92,  M,      "& 의의 - 소송물 - 시효중단 - 기판력", BLUE,
+                      "&의의-소송물-시효중단-기판력"),
+        # 제목만 청색이고 본문이 같은 줄에 이어진다(달림제목). 저자가 칠한
+        # 색이 제목의 끝을 알려 준다 — 이걸 안 가르면 문단 전체가 제목이 된다.
+        # 로마자 I 는 OCR 이 딴 글자로 흘린다. 실물에서는 데바나가리 단다(।),
+        # 여기서는 글꼴이 감당하는 'ㅣ'(U+3163)로 재현한다. 실물 기본서 48개
+        # 논점의 'I. 의의' 가 이 둘 때문에 통째로 사라졌다.
+        (114, M,      "I. 의의", BLUE, "ㅣ.의의"),
+        (114, M + _width("I. 의의 ", 9),
+                      "수량적 가분 채권을 분할 청구하는 것을 말한다.", B,
+                      "수량적가분채권을분할청구하는것을말한다."),
+        # OCR 이 로마자를 소문자 L 로 흘린 자리 (§P0-1). 그대로 두면 헤딩이
+        # 아니라 본문 문단이 되어 목차에서 절 하나가 통째로 사라진다.
+        (156, M,      "II. 소송물", B, "ll.소송물"),
+        (176, M + 14, "소송물은 심판의 대상이 되는 사항이다.", B,
+                      "소송물은심판의대상이되는사항이다."),
+        (198, M,      "III. 기판력", B, "Ill.기판력"),
+        (218, M + 14, "기판력은 후소 법원을 구속한다.", B,
+                      "기판력은후소법원을구속한다."),
+        (244, M,      "IV. 시효중단(11)", BLUE, "IV.시효중단(11)"),
+        (268, M,      "1. 문제점", BLUE, "1.문제점"),
+        (290, M + 14, "소제기시 시효중단의 효력이 있다(제265조).264)", B,
+                      "소제기시시효중단의효력이있다(제265조).264)"),
+        # 번호와 제목이 다른 줄로 떨어지는 자리
+        (317, M,      "3", BLUE, "3"),
+        (316, M + 15, ". 判例 [일나시 나소시]", BLUE, ".判例[일나시나소시"),
+        # 한 문장 안에서 앞쪽 낱말만 청색이다. 실물의 판시 본문이 이 꼴이라,
+        # span 통째로 판정하면 문장 전체가 강조가 되거나 통째로 사라진다 (§P0-2).
+        (338, M + 14, "일부청구는 나머지 부분에 ", BLUE, "일부청구는나머지부분에"),
+        (338, M + 14 + _width("일부청구는 나머지 부분에 ", 9),
+                      "시효중단 효력이 없다(74다1557).", B,
+                      "시효중단효력이없다＜74다1557)."),
+        (364, M,      "4", BLUE, "4"),
+        (363, M + 15, ". 검토", BLUE, ".검토"),
+        (385, M + 14, "확장의 뜻을 밝힌 때에는 전부에 미친다", BLUE,
+                      "확장의뜻을밝힌때에는전부에미친다"),
+        (402, M + 14, "고 본다(91다43695*). 명시적으로 제외265)하였다면 그렇다.", B,
+                      "고본다＜91다43695*).명시적으로제외265)하였다면그렇다."),
+        # ☑ 보너스 논점 박스
+        (437, M,      "☑ 실제로 청구취지 확장하지 않은 부분의 취급", BLUE,
+                      "0실제로청구취지확장하지않은부분의취급"),
+        (460, M + 14, "1. 최고의 효력", B, "1.최고의효력"),
+        (480, M + 14, "6월 내에 조치를 취할 수 있다(2019다223723).", B,
+                      "6월내에조치를취할수있다＜2019다223723)."),
+    ]
+    foots = [
+        # 각주에만 나오는 사건번호. 각주가 추출 대상에서 빠지면 프론트매터
+        # cases 에서 통째로 사라진다 (§P1-1). '다카' 부호와 내부 콜론까지 함께.
+        (600, "264) 즉, 종전 판시에 요건을 추가한 것이다(87다카1416*).", 7.2),
+        (614, "265) 일부 소취하 등이 있을 수 있다. ＜2005다:12345) 참조.", 7.2),
+        # 각주의 뒷줄. 번호로 시작하지 않고 짧지만, 읽히는 한국어라 버리면 안 된다.
+        (628, "다만 그 범위는 따로 본다.", 7.2),
+    ]
+    # 무늬로는 못 잡는 꼬리말. 실물에서 'O과 nr CHAPTER 6 소송절차 개시 nr“' 와
+    # 'O과 己厂—I !' 로 흘러나왔다. 무늬로도 되풀이로도 못 잡으므로 띠 안의
+    # 작고 짧은 줄이라는 것으로 가른다 (§4.1).
+    footer = (676, "O과 己厂—I !", 7.6)
+    # 쪽 맨 위의 장 제목 띠. 이 책은 위에도 아래에도 띠가 있다.
+    runhead = (62, "O과 己厂—I !", 7.6)
+    # 띠(위 12%)를 벗어나 앉은 장 제목 띠. 175쪽이 이랬다. 무늬로만 잡힌다.
+    strayhead = (105, "O과 nr CHAPTER 6 소송절차 개시 nr", 7.6)
+
+    paper = pymupdf.open()
+    page = paper.new_page(width=W, height=H)
+    page.insert_font(fontname="wqy", fontfile=FONT)
+    for y, x, shown, color, _ in rows:
+        page.insert_text((x, y), shown, fontname="wqy", fontsize=9, color=color)
+    page.insert_text((W - M - 24, 244), "sE-8", fontname="wqy", fontsize=7, color=B)
+    # 여백을 벗어나 본문 쪽에 찍힌 옆번호. 실물에서 sO-13 이 이랬다.
+    page.insert_text((M + 90, 268), "sE-9", fontname="wqy", fontsize=7, color=B)
+    for y, text, size in foots:
+        page.insert_text((M, y), text, fontname="wqy", fontsize=size, color=B)
+    page.insert_text((M, footer[0]), footer[1], fontname="wqy",
+                     fontsize=footer[2], color=B)
+    page.insert_text((M, runhead[0]), runhead[1], fontname="wqy",
+                     fontsize=runhead[2], color=B)
+    page.insert_text((M + 200, strayhead[0]), strayhead[1], fontname="wqy",
+                     fontsize=strayhead[2], color=B)
+    pix = page.get_pixmap(dpi=200)
+    paper.close()
+
+    scan = pymupdf.open()
+    out = scan.new_page(width=W, height=H)
+    out.insert_image(pymupdf.Rect(0, 0, W, H), pixmap=pix)
+    out.insert_font(fontname="wqy", fontfile=FONT)
+    for y, x, shown, _, ocr in rows:
+        _place_ocr(out, x, y, shown, ocr, 9)
+    out.insert_text((W - M - 24, 244), "sE-8", fontname="wqy", fontsize=7, render_mode=3)
+    out.insert_text((M + 90, 268), "sE-9", fontname="wqy", fontsize=7, render_mode=3)
+    for y, text, size in foots:
+        out.insert_text((M, y), text, fontname="wqy", fontsize=size, render_mode=3)
+    out.insert_text((M, footer[0]), footer[1], fontname="wqy",
+                    fontsize=footer[2], render_mode=3)
+    out.insert_text((M, runhead[0]), runhead[1], fontname="wqy",
+                    fontsize=runhead[2], render_mode=3)
+    out.insert_text((M + 200, strayhead[0]), strayhead[1], fontname="wqy",
+                    fontsize=strayhead[2], render_mode=3)
+    scan.save(str(path))
+    scan.close()
+
+
 if __name__ == "__main__":
     out = Path(sys.argv[1] if len(sys.argv) > 1 else "tests/fixtures")
     out.mkdir(parents=True, exist_ok=True)
     textbook(out / "기본서.pdf")
     casebook(out / "사례집.pdf")
+    scanned_textbook(out / "스캔기본서.pdf")
+    scanned_book(out / "스캔여러쪽.pdf", pages=6)
     for p in sorted(out.glob("*.pdf")):
         print(f"{p}  {p.stat().st_size:,} bytes")
