@@ -5,6 +5,10 @@
   },
   "permissions": {
     "allow": [
+      "Bash(python 민소법/작업/도구/암기노트.py:*)",
+      "Bash(python 암기노트.py:*)",
+      "Bash(python3 민소법/작업/도구/암기노트.py:*)",
+      "Bash(python3 암기노트.py:*)",
       "Bash(python3 검사.py:*)",
       "Bash(python3 민소법/작업/도구/검사.py:*)",
       "Bash(python 검사.py:*)",
