@@ -3,7 +3,7 @@
 # `config.yaml`(민사소송법)에서 갈라져 나왔다. 프로그램은 교재를 가리지 않고,
 # 교재마다 다른 것은 전부 여기에 있다 (HANDOFF.md).
 #
-#     convert --config config-patent.yaml diagnose "특허법 PDF 폴더" --out 특허출력
+#     convert --config config-patent.yaml diagnose "특허법 PDF 폴더" --out ..\특허법\출력
 #
 # 정규화 규칙과 파서 프로파일은 전부 여기에 있다. 규칙을 고칠 때 코드를 건드리지 않는다.
 # 값을 바꾼 뒤에는 반드시 `convert validate` 를 다시 돌린다.

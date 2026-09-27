@@ -2,7 +2,7 @@
 """references/확인목록.md 의 「확정값」을 노트에 반영한다.
 
 사용자가 원본 책을 보고 확정값 칸을 채우면, 그 줄만 골라
-output/*.md 의 해당 행에서 사건번호를 바꾸고 `<!-- 확인필요: … -->` 주석을 지운다.
+노트/단권화/*.md 의 해당 행에서 사건번호를 바꾸고 `<!-- 확인필요: … -->` 주석을 지운다.
 
     python3 확인적용.py           반영
     python3 확인적용.py --검사    무엇이 바뀔지만 보여 준다
@@ -14,8 +14,8 @@ import re
 import sys
 from pathlib import Path
 
-HERE = Path(__file__).resolve().parent
-목록 = HERE / "references" / "확인목록.md"
+from 경로 import references, 노트
+목록 = references / "확인목록.md"
 _행 = re.compile(r"^\|\s*(\d{3}_[^|]+?)\s*\|\s*(\d+)\s*\|[^|]*\|\s*([^|]*?)\s*\|[^|]*\|\s*([^|]*?)\s*\|\s*$")
 
 
@@ -43,7 +43,7 @@ def main():
 
     적용 = 미매칭 = 0
     for 파일, 적은값, 확정값 in 항목:
-        cands = sorted((HERE / "output").glob(f"{파일.split('_')[0]}_*.md"))
+        cands = sorted(노트.glob(f"{파일.split('_')[0]}_*.md"))
         if not cands:
             print(f"❌ 파일 없음: {파일}")
             미매칭 += 1

@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """단권화 노트 기계 검사. 사람이 읽어야 아는 것은 SKILL.md 「발행 직전 확인」 참조."""
-import re, sys, glob, os
+import re, sys, os
+from 경로 import 노트들
 
 BOLD = re.compile(r'\*\*(.+?)\*\*')
 
@@ -100,5 +101,4 @@ def main(paths):
     print(f'\n지적된 파일 {total} / 검사 {len(paths)}')
 
 if __name__ == '__main__':
-    args = sys.argv[1:] or glob.glob('output/*.md')
-    main(args)
+    main(노트들())

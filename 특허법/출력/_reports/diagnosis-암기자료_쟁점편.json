@@ -1,0 +1,220 @@
+{
+  "file": "C:\\Users\\20090167\\Documents\\4. 특허법\\테마특허법\\암기자료_쟁점편.pdf",
+  "size_bytes": 5221713,
+  "pages": 156,
+  "sampled_pages": [
+    8,
+    13,
+    18,
+    23,
+    28,
+    33,
+    38,
+    43,
+    48,
+    53,
+    58,
+    63,
+    68,
+    73,
+    78,
+    83,
+    88,
+    93,
+    98,
+    103,
+    108,
+    113,
+    118,
+    123
+  ],
+  "text_layer": true,
+  "text_pages_in_sample": 24,
+  "avg_chars_per_page": 991.5,
+  "fonts": [
+    [
+      "RLVPCN+KoPubWorldDotumPB",
+      24
+    ],
+    [
+      "RLVPCN+KoPubWorldBatangPL",
+      24
+    ],
+    [
+      "CQAOGA+KoPubWorldDotumPL",
+      22
+    ],
+    [
+      "TPQMWY+Arita-buri-Bold_OTF",
+      19
+    ],
+    [
+      "ASWWUW+GmarketSansLight",
+      17
+    ],
+    [
+      "NVKWGW+Arita-buri-Bold_OTF",
+      17
+    ],
+    [
+      "OEOOOM+Wingdings-Regular",
+      15
+    ],
+    [
+      "FXXAII+GmarketSansMedium",
+      13
+    ],
+    [
+      "DFBUDQ+HCRBatang",
+      7
+    ],
+    [
+      "QAOIAA+KoPubWorldDotumPL",
+      5
+    ],
+    [
+      "UWAKSA+KoPubWorldDotumPB",
+      5
+    ],
+    [
+      "THZDUN+KoPubWorldBatangPM",
+      4
+    ]
+  ],
+  "font_embedding": {
+    "embedded": 180
+  },
+  "pdffonts": "(pdffonts 없음 — PyMuPDF 폰트 목록으로 대신함)",
+  "body_size": 10.5,
+  "columns": 1,
+  "parser_key": "text_single_column",
+  "parser_order": [
+    "pymupdf",
+    "pymupdf4llm",
+    "marker"
+  ],
+  "profile_hint": "textbook",
+  "images": {
+    "per_page": [
+      [
+        0,
+        24
+      ]
+    ],
+    "dpi": 0.0,
+    "max_coverage": 0.0,
+    "scanned_with_text_layer": false
+  },
+  "color": {
+    "source": "span",
+    "span_rgb_available": true,
+    "total_spans": 3901,
+    "colored_spans": 1336,
+    "distinct_colors": 1,
+    "image_sampled_spans": 0,
+    "image_colored_spans": 0,
+    "image_palette": [],
+    "palette": [
+      {
+        "hex": "#315f97",
+        "spans": 1336,
+        "chars": 3214,
+        "samples": [
+          [
+            8,
+            "진보성"
+          ],
+          [
+            8,
+            "제"
+          ],
+          [
+            8,
+            "조 제항"
+          ],
+          [
+            8,
+            "("
+          ],
+          [
+            8,
+            "29"
+          ]
+        ]
+      }
+    ],
+    "drawing_colors": [
+      [
+        "#315f97",
+        681
+      ],
+      [
+        "#719fd1",
+        14
+      ]
+    ]
+  },
+  "sidenote": {
+    "found": 0,
+    "found_anywhere": 0,
+    "merged_suspect": [],
+    "samples": [],
+    "x_ratios": []
+  },
+  "cases": {
+    "samples": [],
+    "bad_open_brackets": [],
+    "stars_in_sample": 0
+  },
+  "mnemonics": [],
+  "hanja_in_sample": 32,
+  "footnote": {
+    "lines_in_sample": 18,
+    "rule_found": true,
+    "numbers": []
+  },
+  "exam_years": [],
+  "bonus_boxes_in_sample": 0,
+  "problem_numbers": [],
+  "pages_detail": [
+    {
+      "page": 8,
+      "columns": 1,
+      "chars": 1245,
+      "spans": 216,
+      "footnote_lines": 7,
+      "footnote_rule": true,
+      "hanja": 5,
+      "cases": [],
+      "bad_open": [],
+      "sidenotes": [],
+      "sidenote_merged": []
+    },
+    {
+      "page": 55,
+      "columns": 1,
+      "chars": 941,
+      "spans": 159,
+      "footnote_lines": 5,
+      "footnote_rule": true,
+      "hanja": 17,
+      "cases": [],
+      "bad_open": [],
+      "sidenotes": [],
+      "sidenote_merged": []
+    },
+    {
+      "page": 102,
+      "columns": 1,
+      "chars": 726,
+      "spans": 110,
+      "footnote_lines": 6,
+      "footnote_rule": true,
+      "hanja": 10,
+      "cases": [],
+      "bad_open": [],
+      "sidenotes": [],
+      "sidenote_merged": []
+    }
+  ]
+}

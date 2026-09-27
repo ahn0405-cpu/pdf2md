@@ -1,5 +1,6 @@
-import re, glob
-for p in sorted(glob.glob('output/*.md')):
+import re
+from 경로 import 노트들
+for p in 노트들():
     lines=open(p,encoding='utf-8').read().split('\n')
     for i,ln in enumerate(lines):
         if '한 줄 요약' not in ln: continue

@@ -1,0 +1,131 @@
+{
+  "file": "C:\\Users\\20090167\\Documents\\4. 특허법\\테마특허법\\판례집 색인.pdf",
+  "size_bytes": 651851,
+  "pages": 8,
+  "sampled_pages": [
+    1,
+    2,
+    3,
+    4,
+    5,
+    6,
+    7,
+    8
+  ],
+  "text_layer": true,
+  "text_pages_in_sample": 8,
+  "avg_chars_per_page": 6253.4,
+  "fonts": [
+    [
+      "YMQMYA+KoPubWorldDotumPL",
+      8
+    ],
+    [
+      "PBBIGG+GmarketSansMedium",
+      4
+    ],
+    [
+      "QKWOKY+GmarketSansMedium",
+      1
+    ]
+  ],
+  "font_embedding": {
+    "embedded": 13
+  },
+  "pdffonts": "(pdffonts 없음 — PyMuPDF 폰트 목록으로 대신함)",
+  "body_size": 8.5,
+  "columns": 1,
+  "parser_key": "text_single_column",
+  "parser_order": [
+    "pymupdf",
+    "pymupdf4llm",
+    "marker"
+  ],
+  "profile_hint": "textbook",
+  "images": {
+    "per_page": [
+      [
+        0,
+        8
+      ]
+    ],
+    "dpi": 0.0,
+    "max_coverage": 0.0,
+    "scanned_with_text_layer": false
+  },
+  "color": {
+    "source": "span",
+    "span_rgb_available": true,
+    "total_spans": 4160,
+    "colored_spans": 0,
+    "distinct_colors": 0,
+    "image_sampled_spans": 0,
+    "image_colored_spans": 0,
+    "image_palette": [],
+    "palette": [],
+    "drawing_colors": []
+  },
+  "sidenote": {
+    "found": 0,
+    "found_anywhere": 0,
+    "merged_suspect": [],
+    "samples": [],
+    "x_ratios": []
+  },
+  "cases": {
+    "samples": [],
+    "bad_open_brackets": [],
+    "stars_in_sample": 0
+  },
+  "mnemonics": [],
+  "hanja_in_sample": 0,
+  "footnote": {
+    "lines_in_sample": 0,
+    "rule_found": false,
+    "numbers": []
+  },
+  "exam_years": [],
+  "bonus_boxes_in_sample": 0,
+  "problem_numbers": [],
+  "pages_detail": [
+    {
+      "page": 1,
+      "columns": 1,
+      "chars": 6391,
+      "spans": 489,
+      "footnote_lines": 0,
+      "footnote_rule": false,
+      "hanja": 0,
+      "cases": [],
+      "bad_open": [],
+      "sidenotes": [],
+      "sidenote_merged": []
+    },
+    {
+      "page": 3,
+      "columns": 1,
+      "chars": 6975,
+      "spans": 580,
+      "footnote_lines": 0,
+      "footnote_rule": false,
+      "hanja": 0,
+      "cases": [],
+      "bad_open": [],
+      "sidenotes": [],
+      "sidenote_merged": []
+    },
+    {
+      "page": 5,
+      "columns": 1,
+      "chars": 6873,
+      "spans": 588,
+      "footnote_lines": 0,
+      "footnote_rule": false,
+      "hanja": 0,
+      "cases": [],
+      "bad_open": [],
+      "sidenotes": [],
+      "sidenote_merged": []
+    }
+  ]
+}

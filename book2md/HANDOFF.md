@@ -23,7 +23,7 @@ config-patent.yaml    교재별  ← 새 교재는 이 파일 하나를 만든�
 - **`TODO(진단)`** — 실물을 봐야 정해지는 자리. 민소법 값이 그대로 남아 있다.
 
 ```bat
-convert --book patent diagnose "특허법 PDF 폴더" --out 특허출력
+convert --book patent diagnose "특허법 PDF 폴더" --out ..\특허법\출력
 convert --config config.yaml --config config-patent.yaml diagnose …   :: 같은 뜻
 ```
 
@@ -208,10 +208,10 @@ convert --config config.yaml --config config-patent.yaml diagnose …   :: 같�
 cd C:\MyCode\pdf2md\book2md
 git pull
 
-convert --config config-patent.yaml diagnose "특허법 PDF 폴더" --out 특허출력
+convert --config config-patent.yaml diagnose "특허법 PDF 폴더" --out ..\특허법\출력
 ```
 
-진단 리포트(`특허출력\_reports\diagnosis-*.md`)를 보고 시작한다. 텍스트 레이어
+진단 리포트(`..\특허법\출력\_reports\diagnosis-*.md`)를 보고 시작한다. 텍스트 레이어
 유무, 단 수, 색 종류, 옆번호·두문자·별표 표본 수가 거기 다 있다.
 
 ### 진단을 보고 채울 다섯 자리
@@ -238,9 +238,9 @@ convert --config config-patent.yaml probe "특허법 기본서.pdf" --lines --pa
 convert --config config-patent.yaml probe "특허법 사례집.pdf" --lines --pages 20-40
 
 REM 한 장만 시험 변환
-convert --config config-patent.yaml run "특허법 기본서.pdf" --pages 120-145 --profile textbook --out 특허출력\기본서
+convert --config config-patent.yaml run "특허법 기본서.pdf" --pages 120-145 --profile textbook --out ..\특허법\출력\기본서
 REM 절 제목 전수 점검 — 맨 윗줄 「목차 띠를 읽은 파일 N/M개」를 가장 먼저 본다
-convert --config config-patent.yaml audit-sections 특허출력 --out audit.md
+convert --config config-patent.yaml audit-sections ..\특허법\출력 --out _work/audit.md
 ```
 
 사례집은 상·하로 나뉘어 있으면 **출력 폴더를 나눈다.** 같은 폴더에 쏟으면

@@ -1,0 +1,227 @@
+{
+  "file": "C:\\Users\\20090167\\Documents\\4. 특허법\\테마특허법\\판례집_정오.pdf",
+  "size_bytes": 2612737,
+  "pages": 6,
+  "sampled_pages": [
+    1,
+    2,
+    3,
+    4,
+    5,
+    6
+  ],
+  "text_layer": true,
+  "text_pages_in_sample": 6,
+  "avg_chars_per_page": 849.7,
+  "fonts": [
+    [
+      "IWWQEU+GmarketSansBold",
+      5
+    ],
+    [
+      "YGEISW+GmarketSansBold",
+      5
+    ],
+    [
+      "PZBBEX+Wingdings-Regular",
+      5
+    ],
+    [
+      "QIUCQC+KoPubWorldDotumPB",
+      5
+    ],
+    [
+      "NVNHWP+KoPubWorldDotumBold",
+      5
+    ],
+    [
+      "JZBFEP+KoPubWorldDotumLight",
+      5
+    ],
+    [
+      "FDVYKS+GmarketSansMedium",
+      5
+    ],
+    [
+      "RRZJOP+KoPubWorldDotumPL",
+      5
+    ],
+    [
+      "WCMSEC+KoPubWorldDotumPB",
+      4
+    ],
+    [
+      "IKIQGU+GmarketSansMedium",
+      3
+    ],
+    [
+      "YUWGAC+KoPubWorldDotumPM",
+      3
+    ],
+    [
+      "GMYKKC+KoPubWorldBatangPL",
+      2
+    ]
+  ],
+  "font_embedding": {
+    "embedded": 55
+  },
+  "pdffonts": "(pdffonts 없음 — PyMuPDF 폰트 목록으로 대신함)",
+  "body_size": 10.0,
+  "columns": 1,
+  "parser_key": "text_single_column",
+  "parser_order": [
+    "pymupdf",
+    "pymupdf4llm",
+    "marker"
+  ],
+  "profile_hint": "textbook",
+  "images": {
+    "per_page": [
+      [
+        0,
+        6
+      ]
+    ],
+    "dpi": 0.0,
+    "max_coverage": 0.0,
+    "scanned_with_text_layer": false
+  },
+  "color": {
+    "source": "span",
+    "span_rgb_available": true,
+    "total_spans": 738,
+    "colored_spans": 33,
+    "distinct_colors": 3,
+    "image_sampled_spans": 0,
+    "image_colored_spans": 0,
+    "image_palette": [],
+    "palette": [
+      {
+        "hex": "#0000ff",
+        "spans": 28,
+        "chars": 304,
+        "samples": [
+          [
+            2,
+            "다."
+          ],
+          [
+            2,
+            "원심"
+          ],
+          [
+            2,
+            "은같은취지에서,"
+          ],
+          [
+            2,
+            "통상의기술자가이사건제항발명의다파글리플로진을확인대상발명의다파글리플로진포메이"
+          ],
+          [
+            2,
+            "1"
+          ]
+        ]
+      },
+      {
+        "hex": "#ff0000",
+        "spans": 4,
+        "chars": 8,
+        "samples": [
+          [
+            4,
+            "4"
+          ],
+          [
+            5,
+            "상표권사건"
+          ],
+          [
+            5,
+            "("
+          ],
+          [
+            5,
+            ")"
+          ]
+        ]
+      },
+      {
+        "hex": "#0c608d",
+        "spans": 1,
+        "chars": 1,
+        "samples": [
+          [
+            4,
+            "X"
+          ]
+        ]
+      }
+    ],
+    "drawing_colors": []
+  },
+  "sidenote": {
+    "found": 0,
+    "found_anywhere": 0,
+    "merged_suspect": [],
+    "samples": [],
+    "x_ratios": []
+  },
+  "cases": {
+    "samples": [],
+    "bad_open_brackets": [],
+    "stars_in_sample": 0
+  },
+  "mnemonics": [],
+  "hanja_in_sample": 6,
+  "footnote": {
+    "lines_in_sample": 0,
+    "rule_found": true,
+    "numbers": []
+  },
+  "exam_years": [],
+  "bonus_boxes_in_sample": 0,
+  "problem_numbers": [],
+  "pages_detail": [
+    {
+      "page": 1,
+      "columns": 1,
+      "chars": 14,
+      "spans": 4,
+      "footnote_lines": 0,
+      "footnote_rule": false,
+      "hanja": 0,
+      "cases": [],
+      "bad_open": [],
+      "sidenotes": [],
+      "sidenote_merged": []
+    },
+    {
+      "page": 2,
+      "columns": 1,
+      "chars": 1630,
+      "spans": 185,
+      "footnote_lines": 0,
+      "footnote_rule": true,
+      "hanja": 0,
+      "cases": [],
+      "bad_open": [],
+      "sidenotes": [],
+      "sidenote_merged": []
+    },
+    {
+      "page": 3,
+      "columns": 2,
+      "chars": 674,
+      "spans": 114,
+      "footnote_lines": 0,
+      "footnote_rule": true,
+      "hanja": 6,
+      "cases": [],
+      "bad_open": [],
+      "sidenotes": [],
+      "sidenote_merged": []
+    }
+  ]
+}

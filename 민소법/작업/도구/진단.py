@@ -1,5 +1,6 @@
-import re, glob, sys
-files = sys.argv[1:] or sorted(glob.glob('output/*.md'))
+import re
+from 경로 import 노트들, 이름
+files = 노트들()
 print(f'{"파일":34} 관련법리 결단無이유 취지1줄 문장뼈대 비유참조 판시BOLD초과')
 for p in files:
     L = open(p,encoding='utf-8').read().split('\n')
@@ -37,4 +38,4 @@ for p in files:
     초과 = sum(1 for m in re.finditer(r'\*\*(.+?)\*\*', s, re.S)
                if m.start()<len(판시) and 판시[m.start()]
                and len(re.sub(r'[`\[\]()·,/…\s>\n]','',m.group(1)))>15)
-    print(f'{p.replace("output/",""):34} {관련법리:6} {무이유:8} {한줄:7} {문장뼈대:7} {비유참조:7} {초과:9}')
+    print(f'{이름(p):34} {관련법리:6} {무이유:8} {한줄:7} {문장뼈대:7} {비유참조:7} {초과:9}')

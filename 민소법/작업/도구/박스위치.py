@@ -8,8 +8,7 @@ import re
 import sys
 from pathlib import Path
 
-HERE = Path(__file__).resolve().parent
-기본서 = HERE.parent / "출력" / "기본서"
+from 경로 import 기본서
 _절 = re.compile(r"^#{3,4}\s+([IVX]+\.\s*[^\n]+)")
 _항 = re.compile(r"^\*\*(\d+\.\s*[^*]+)\*\*|^==?\*?\*?(\d+\.\s*[^=*]+)")
 _박스 = re.compile(r"^>?\s*#{3,4}\s*☑\s*(.+)")

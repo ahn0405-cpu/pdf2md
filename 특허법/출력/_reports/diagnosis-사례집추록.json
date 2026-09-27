@@ -1,0 +1,230 @@
+{
+  "file": "C:\\Users\\20090167\\Documents\\4. 특허법\\테마특허법\\사례집추록.pdf",
+  "size_bytes": 1923490,
+  "pages": 7,
+  "sampled_pages": [
+    1,
+    2,
+    3,
+    4,
+    5,
+    6,
+    7
+  ],
+  "text_layer": true,
+  "text_pages_in_sample": 7,
+  "avg_chars_per_page": 530.0,
+  "fonts": [
+    [
+      "QKSEYK+Arita-buri-Bold_OTF",
+      6
+    ],
+    [
+      "CYQIEG+GmarketSansMedium",
+      6
+    ],
+    [
+      "TRXGWA+GmarketSansLight",
+      6
+    ],
+    [
+      "JBRLEN+KoPubWorldDotumPL",
+      6
+    ],
+    [
+      "AUMWYW+GmarketSansMedium",
+      6
+    ],
+    [
+      "BDXHUN+KoPubDotumBold",
+      6
+    ],
+    [
+      "GUCQKA+KoPubWorldDotumPM",
+      5
+    ],
+    [
+      "HXPXIN+KoPubWorldBatangPL",
+      5
+    ],
+    [
+      "PBYKGO+Arita-buri-Bold_OTF",
+      4
+    ],
+    [
+      "DBDVQN+KoPubBatangLight",
+      4
+    ],
+    [
+      "JVVLEN+KoPubWorldDotumPB",
+      3
+    ],
+    [
+      "AOAAWA+KoPubWorldDotumPB",
+      1
+    ]
+  ],
+  "font_embedding": {
+    "embedded": 59
+  },
+  "pdffonts": "(pdffonts 없음 — PyMuPDF 폰트 목록으로 대신함)",
+  "body_size": 10.5,
+  "columns": 1,
+  "parser_key": "text_single_column",
+  "parser_order": [
+    "pymupdf",
+    "pymupdf4llm",
+    "marker"
+  ],
+  "profile_hint": "casebook",
+  "images": {
+    "per_page": [
+      [
+        0,
+        7
+      ]
+    ],
+    "dpi": 0.0,
+    "max_coverage": 0.0,
+    "scanned_with_text_layer": false
+  },
+  "color": {
+    "source": "span",
+    "span_rgb_available": true,
+    "total_spans": 589,
+    "colored_spans": 50,
+    "distinct_colors": 2,
+    "image_sampled_spans": 0,
+    "image_colored_spans": 0,
+    "image_palette": [],
+    "palette": [
+      {
+        "hex": "#0000ff",
+        "spans": 28,
+        "chars": 190,
+        "samples": [
+          [
+            1,
+            "파란색표시"
+          ],
+          [
+            2,
+            "를쉽게발명할수"
+          ],
+          [
+            2,
+            "있는것"
+          ],
+          [
+            3,
+            "30"
+          ],
+          [
+            3,
+            "30"
+          ]
+        ]
+      },
+      {
+        "hex": "#ff0000",
+        "spans": 22,
+        "chars": 128,
+        "samples": [
+          [
+            1,
+            "빨간색취소선"
+          ],
+          [
+            2,
+            "및그에따른거절이유통지방법이"
+          ],
+          [
+            3,
+            "공유"
+          ],
+          [
+            5,
+            "아래의답안으로전체대체"
+          ],
+          [
+            5,
+            "*"
+          ]
+        ]
+      }
+    ],
+    "drawing_colors": []
+  },
+  "sidenote": {
+    "found": 0,
+    "found_anywhere": 0,
+    "merged_suspect": [],
+    "samples": [],
+    "x_ratios": []
+  },
+  "cases": {
+    "samples": [],
+    "bad_open_brackets": [],
+    "stars_in_sample": 0
+  },
+  "mnemonics": [],
+  "hanja_in_sample": 17,
+  "footnote": {
+    "lines_in_sample": 1,
+    "rule_found": true,
+    "numbers": []
+  },
+  "exam_years": [
+    [
+      "51",
+      1
+    ],
+    [
+      "60",
+      1
+    ]
+  ],
+  "bonus_boxes_in_sample": 0,
+  "problem_numbers": [],
+  "pages_detail": [
+    {
+      "page": 1,
+      "columns": 1,
+      "chars": 85,
+      "spans": 17,
+      "footnote_lines": 0,
+      "footnote_rule": false,
+      "hanja": 0,
+      "cases": [],
+      "bad_open": [],
+      "sidenotes": [],
+      "sidenote_merged": []
+    },
+    {
+      "page": 3,
+      "columns": 2,
+      "chars": 685,
+      "spans": 140,
+      "footnote_lines": 1,
+      "footnote_rule": true,
+      "hanja": 7,
+      "cases": [],
+      "bad_open": [],
+      "sidenotes": [],
+      "sidenote_merged": []
+    },
+    {
+      "page": 5,
+      "columns": 1,
+      "chars": 1205,
+      "spans": 155,
+      "footnote_lines": 0,
+      "footnote_rule": false,
+      "hanja": 10,
+      "cases": [],
+      "bad_open": [],
+      "sidenotes": [],
+      "sidenote_merged": []
+    }
+  ]
+}

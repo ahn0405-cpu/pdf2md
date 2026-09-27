@@ -1,0 +1,220 @@
+{
+  "file": "C:\\Users\\20090167\\Documents\\4. 특허법\\테마특허법\\테마_목차집.pdf",
+  "size_bytes": 4885935,
+  "pages": 155,
+  "sampled_pages": [
+    8,
+    13,
+    18,
+    23,
+    28,
+    33,
+    38,
+    43,
+    48,
+    53,
+    58,
+    63,
+    68,
+    73,
+    78,
+    83,
+    88,
+    93,
+    98,
+    103,
+    108,
+    113,
+    118,
+    123
+  ],
+  "text_layer": true,
+  "text_pages_in_sample": 24,
+  "avg_chars_per_page": 425.6,
+  "fonts": [
+    [
+      "NLSWWW+Arita-buri-Bold_OTF",
+      24
+    ],
+    [
+      "OUMQOS+Arita-buri-Bold_OTF",
+      24
+    ],
+    [
+      "WGWCEE+KoPubWorldDotumPB",
+      24
+    ],
+    [
+      "WSIYIC+GmarketSansMedium",
+      22
+    ],
+    [
+      "QYKUAO+Wingdings-Regular",
+      22
+    ],
+    [
+      "DPPZQR+KoPubWorldDotumPL",
+      21
+    ],
+    [
+      "FNRAOI+GmarketSansLight",
+      18
+    ],
+    [
+      "RHXTOR+KoPubWorldDotumPM",
+      18
+    ],
+    [
+      "MWWQIE+GmarketSansMedium",
+      13
+    ],
+    [
+      "KYEWCE+KoPubWorldDotumPL",
+      9
+    ],
+    [
+      "JJLQXE+HCRBatang",
+      9
+    ],
+    [
+      "DPPZQR+KoPubWorldDotumPB",
+      5
+    ]
+  ],
+  "font_embedding": {
+    "embedded": 223
+  },
+  "pdffonts": "(pdffonts 없음 — PyMuPDF 폰트 목록으로 대신함)",
+  "body_size": 11.5,
+  "columns": 1,
+  "parser_key": "text_single_column",
+  "parser_order": [
+    "pymupdf",
+    "pymupdf4llm",
+    "marker"
+  ],
+  "profile_hint": "textbook",
+  "images": {
+    "per_page": [
+      [
+        0,
+        24
+      ]
+    ],
+    "dpi": 0.0,
+    "max_coverage": 0.0,
+    "scanned_with_text_layer": false
+  },
+  "color": {
+    "source": "span",
+    "span_rgb_available": true,
+    "total_spans": 2161,
+    "colored_spans": 952,
+    "distinct_colors": 1,
+    "image_sampled_spans": 0,
+    "image_colored_spans": 0,
+    "image_palette": [],
+    "palette": [
+      {
+        "hex": "#315f97",
+        "spans": 952,
+        "chars": 3726,
+        "samples": [
+          [
+            8,
+            "절차의 효력 승계 및 속행 제"
+          ],
+          [
+            8,
+            "조 내지 제"
+          ],
+          [
+            8,
+            "조"
+          ],
+          [
+            8,
+            "6."
+          ],
+          [
+            8,
+            "("
+          ]
+        ]
+      }
+    ],
+    "drawing_colors": [
+      [
+        "#315f97",
+        772
+      ],
+      [
+        "#719fd1",
+        18
+      ]
+    ]
+  },
+  "sidenote": {
+    "found": 0,
+    "found_anywhere": 0,
+    "merged_suspect": [],
+    "samples": [],
+    "x_ratios": []
+  },
+  "cases": {
+    "samples": [],
+    "bad_open_brackets": [],
+    "stars_in_sample": 0
+  },
+  "mnemonics": [],
+  "hanja_in_sample": 11,
+  "footnote": {
+    "lines_in_sample": 2,
+    "rule_found": true,
+    "numbers": []
+  },
+  "exam_years": [],
+  "bonus_boxes_in_sample": 0,
+  "problem_numbers": [],
+  "pages_detail": [
+    {
+      "page": 8,
+      "columns": 1,
+      "chars": 625,
+      "spans": 150,
+      "footnote_lines": 0,
+      "footnote_rule": false,
+      "hanja": 2,
+      "cases": [],
+      "bad_open": [],
+      "sidenotes": [],
+      "sidenote_merged": []
+    },
+    {
+      "page": 54,
+      "columns": 1,
+      "chars": 413,
+      "spans": 86,
+      "footnote_lines": 1,
+      "footnote_rule": true,
+      "hanja": 3,
+      "cases": [],
+      "bad_open": [],
+      "sidenotes": [],
+      "sidenote_merged": []
+    },
+    {
+      "page": 100,
+      "columns": 1,
+      "chars": 381,
+      "spans": 85,
+      "footnote_lines": 1,
+      "footnote_rule": true,
+      "hanja": 6,
+      "cases": [],
+      "bad_open": [],
+      "sidenotes": [],
+      "sidenote_merged": []
+    }
+  ]
+}

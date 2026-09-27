@@ -14,15 +14,15 @@
 그 절의 판례가 그 문제 전부에 붙기 때문이다. 실측으로 84다552 가 여섯 문제에
 붙었다. 1·2 로 어디든 붙은 판례는 3단계로 내려가지 않는다.
 
-    python3 색인.py ../출력/기본서/45_046일부청구.md
+    python3 색인.py 046                                  논점번호로
+    python3 색인.py ../../출력/기본서/45_046일부청구.md   경로로
 """
 import json
 import re
 import sys
 from pathlib import Path
 
-HERE = Path(__file__).resolve().parent
-사례집 = HERE.parent / "출력" / "사례집"
+from 경로 import 기본서, 사례집
 
 _문제 = re.compile(r"^##\s+([A-Z]-\d+)\.")
 _헤딩 = re.compile(r"^###+\s+(.*)$")
@@ -150,6 +150,12 @@ def main() -> int:
               f"두문자 {sum(1 for v in db.values() if v['두문자'])})")
         return 0
     src = Path(sys.argv[1])
+    if not src.exists():                    # 논점번호만 준 경우
+        cands = sorted(기본서.glob(f"*_{sys.argv[1]}*.md"))
+        if not cands:
+            print(f"기본서에 없음: {sys.argv[1]}")
+            return 1
+        src = cands[0]
     cases, 표 = 기본서읽기(src)
     논점 = re.sub(r"[\s\d]", "", re.search(r'^chapter: "(.*)"',
                  src.read_text(encoding="utf-8"), re.M).group(1))

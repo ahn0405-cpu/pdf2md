@@ -8,14 +8,13 @@
     2 기본서 각주        사실관계를 각주로 내린 자리
     3 판시 자체          위 둘이 없을 때 요건에서 역구성한다
 
-    python3 사실관계.py output/052_처분권주의.md
+    python3 사실관계.py 052
 """
 import re
 import sys
 from pathlib import Path
 
-HERE = Path(__file__).resolve().parent
-사례집 = HERE.parent / "출력" / "사례집"
+from 경로 import 사례집, 노트들
 
 _뱃지 = re.compile(r"`([A-Q]-\d+)`")
 _사건번호 = re.compile(r"^#{2,6}\s+(?:\d\)\s*)?((?:19|20)?\d{2}(?:다카|다|카|그|초|오|므|두|누|마|헌마)\d+)")
@@ -88,5 +87,5 @@ if __name__ == "__main__":
     if not sys.argv[1:]:
         print(f"사례집 문제 {len(표)}개 색인")
         sys.exit()
-    for 노트 in sys.argv[1:]:
+    for 노트 in 노트들():
         본다(노트, 표)

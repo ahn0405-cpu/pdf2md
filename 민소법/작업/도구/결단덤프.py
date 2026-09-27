@@ -1,5 +1,6 @@
-import re, sys
-for p in sys.argv[1:]:
+import re
+from 경로 import 노트들
+for p in 노트들():
     L=open(p,encoding='utf-8').read().split('\n')
     print(f'##### {p}')
     for i,l in enumerate(L):

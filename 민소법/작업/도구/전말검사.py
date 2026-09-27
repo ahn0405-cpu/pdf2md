@@ -7,8 +7,8 @@
   안나뉨     「상황」과 「주장과 소 제기」를 한 항목에 합쳤다
 """
 import re
-import sys
-import glob
+
+from 경로 import 노트들, 이름
 
 벗김 = lambda l: re.sub(r"^[>\s]*>", "", l) if l.lstrip().startswith(">") else l
 _태도 = re.compile(r"^[>\s]*(#{2,6})\s*②\s*판례의 태도")
@@ -56,7 +56,7 @@ def 본다(p):
 
 
 if __name__ == "__main__":
-    files = sys.argv[1:] or sorted(glob.glob("output/*.md"))
+    files = 노트들()
     합 = [0, 0, 0, 0]
     print(f'{"파일":36} 판례  ①없음  甲乙없음  안나뉨')
     for p in files:
@@ -65,5 +65,5 @@ if __name__ == "__main__":
         cnt = sum(1 for l in open(p, encoding="utf-8") if _태도.match(l))
         합[0] += cnt; 합[1] += len(없음); 합[2] += len(무인물); 합[3] += len(안나뉨)
         if 없음 or 무인물 or 안나뉨:
-            print(f'{p.replace("output/","")[:34]:36} {cnt:4} {len(없음):6} {len(무인물):8} {len(안나뉨):7}')
+            print(f'{이름(p)[:34]:36} {cnt:4} {len(없음):6} {len(무인물):8} {len(안나뉨):7}')
     print(f'\n합계  판례 {합[0]}  ①없음 {합[1]}  甲乙없음 {합[2]}  안나뉨 {합[3]}')

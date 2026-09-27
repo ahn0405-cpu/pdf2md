@@ -1,7 +1,8 @@
 """짝 판례 점검 — 구별 개념이 가리킨 상대 판례가 노트 어딘가에서 실제로 다뤄지는지."""
-import re, glob
+import re
+from 경로 import 노트들
 CASE = re.compile(r'\b\d{2,4}\s?(?:다|므|마|모|두|누|후|허|그|카|재다|재누)\s?\d{2,6}')
-files=sorted(glob.glob('output/*.md'))
+files=노트들()
 treated=set()
 for p in files:
     for ln in open(p,encoding='utf-8'):

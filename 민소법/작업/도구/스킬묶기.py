@@ -6,8 +6,8 @@
 손으로 하지 않고 이 스크립트로 한다. SKILL.md 를 고쳤으면 다시 돌려 올린다.
 
 꾸러미에 넣는 것은 **SKILL.md 가 실제로 참조하는 것**뿐이다.
-스크립트는 넣지 않는다 — `../출력/사례집` 처럼 리포 상대 경로로 소스를 읽어서
-꾸러미 안에서는 동작하지 않는다.
+스크립트는 넣지 않는다 — 리포의 `출력/`·`노트/` 를 읽어서 꾸러미 안에서는
+동작하지 않는다. 꾸러미는 `작업/민소법-단권화.zip` 에 생긴다.
 
     python3 스킬묶기.py            묶고 검사한다
     python3 스킬묶기.py --검사      묶지 않고 무엇이 들어갈지만 본다
@@ -18,7 +18,7 @@ import sys
 import zipfile
 from pathlib import Path
 
-HERE = Path(__file__).resolve().parent
+from 경로 import 작업 as HERE    # SKILL.md·references·samples 가 있는 곳
 이름 = "민소법-단권화"
 담을것 = [
     "SKILL.md",

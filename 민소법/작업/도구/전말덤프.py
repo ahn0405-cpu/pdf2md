@@ -4,7 +4,7 @@
 블록마다 (가) 지금 쓰인 상황과 주장 (나) 사례집 지문 (다) 판시를 함께 낸다.
 상황을 고치려면 세 개를 같이 봐야 한다.
 
-    python3 전말덤프.py output/052_처분권주의.md
+    python3 전말덤프.py 052
 """
 import re
 import sys
@@ -12,6 +12,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from 사실관계 import 문제모음, _뱃지, _사건번호
+from 경로 import 노트들
 
 벗김 = lambda l: re.sub(r"^[>\s]*>", "", l) if l.lstrip().startswith(">") else l
 
@@ -54,5 +55,5 @@ def 본다(노트, 표, 폭=600):
 
 if __name__ == "__main__":
     표 = 문제모음()
-    for 노트 in sys.argv[1:]:
+    for 노트 in 노트들():
         본다(노트, 표)
