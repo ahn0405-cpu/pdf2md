@@ -1,0 +1,35 @@
+{
+  "env": {
+    "PYTHONUTF8": "1",
+    "PYTHONIOENCODING": "utf-8"
+  },
+  "permissions": {
+    "allow": [
+      "Bash(python3 검사.py:*)",
+      "Bash(python3 진단.py:*)",
+      "Bash(python3 전말검사.py:*)",
+      "Bash(python3 전말덤프.py:*)",
+      "Bash(python3 사실관계.py:*)",
+      "Bash(python3 결단덤프.py:*)",
+      "Bash(python3 두문자검사.py:*)",
+      "Bash(python3 짝판례검사.py:*)",
+      "Bash(python3 박스위치.py:*)",
+      "Bash(python3 색인.py:*)",
+      "Bash(python3 확인적용.py:*)",
+      "Bash(python 검사.py:*)",
+      "Bash(python 진단.py:*)",
+      "Bash(python 전말검사.py:*)",
+      "Bash(python 전말덤프.py:*)",
+      "Bash(python 사실관계.py:*)",
+      "Bash(python 결단덤프.py:*)",
+      "Bash(git status:*)",
+      "Bash(git diff:*)",
+      "Bash(git log:*)",
+      "Bash(git add:*)",
+      "Bash(git fetch:*)",
+      "Read(//home/user/pdf2md/**)",
+      "Grep",
+      "Glob"
+    ]
+  }
+}

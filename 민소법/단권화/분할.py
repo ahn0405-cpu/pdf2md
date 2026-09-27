@@ -25,7 +25,7 @@ def split(path, specs):
             return ''.join(out)
         return m.group(0)
     s2=BOLD.sub(repl,s)
-    open(path,'w',encoding='utf-8').write(s2)
+    open(path,'w',encoding='utf-8',newline='\n').write(s2)
     miss=[k[:20] for i,(k,_) in enumerate(specs) if i not in used]
     msg=f'{path}: 적용 {len(used)}/{len(specs)}'
     if miss: msg+=f'\n  ❌미매칭: {miss}'

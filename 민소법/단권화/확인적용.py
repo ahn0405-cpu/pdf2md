@@ -68,7 +68,7 @@ def main():
             미매칭 += 1
             continue
         if not 검사:
-            p.write_text("\n".join(새), encoding="utf-8")
+            open(p, "w", encoding="utf-8", newline="\n").write("\n".join(새))
         적용 += 1
 
     말 = "반영" if not 검사 else "반영 예정"

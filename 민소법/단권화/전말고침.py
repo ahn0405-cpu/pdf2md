@@ -32,4 +32,4 @@ def 고친다(path, 쌍):
         접두 = re.match(r"^([>\s]*>\s*)?", L[i]).group(1) or ""
         본문 = [접두 + x if x else 접두.rstrip() for x in 새.rstrip("\n").split("\n")]
         L[i:j] = 본문
-    open(path, "w", encoding="utf-8").write("\n".join(L))
+    open(path, "w", encoding="utf-8", newline="\n").write("\n".join(L))

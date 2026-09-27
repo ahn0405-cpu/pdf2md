@@ -80,7 +80,7 @@ def 이동(path, 박스키, 앵커, 레벨=None):
         if bs + 1 >= len(나머지) or _각주.match(나머지[bs + 1].strip()) or 나머지[bs + 1].strip() == "":
             del 나머지[bs]
     새 = 나머지[:ae] + [""] + 블록 + 나머지[ae:]
-    open(path, "w", encoding="utf-8").write("\n".join(새))
+    open(path, "w", encoding="utf-8", newline="\n").write("\n".join(새))
     print(f"✔ {path}: ☑{박스키} → {앵커} 뒤 (레벨 {blvl}→{새레벨})")
     return True
 
