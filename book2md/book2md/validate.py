@@ -16,11 +16,12 @@ from collections import Counter, defaultdict
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from .model import is_generated
 from .patterns import Patterns
 
 _SIDE = re.compile(r"s[A-Z]-\d{1,4}")
 _EMPH = re.compile(r"==([^=\n]{1,200})==")
-_HEAD = re.compile(r"^(#{1,6})\s+(.*)$")
+_HEAD = re.compile(r"^(#{1,6})\s+(.*)$", re.M)
 _FM = re.compile(r"^---\n.*?\n---\n", re.S)
 _STUDY = ("학설", "判例", "판례", "검토")
 
@@ -74,10 +75,24 @@ def md_files(root: Path) -> list[Path]:
     return sorted(out)
 
 
+def _is_ours(path: Path) -> bool:
+    """우리가 만든 결과물인가.
+
+    사람이 출력 폴더에 둔 메모까지 검증하면 그 안의 사건번호가 caselist 에
+    섞이고 별표 수가 어긋난다. 프론트매터에 parser 가 적힌 것만 본다.
+    """
+    return is_generated(path)
+
+
 def validate(root, cfg: dict, baseline: dict | None = None) -> Result:
     pat = Patterns.build(cfg)
     res = Result()
-    files = md_files(Path(root))
+    found = md_files(Path(root))
+    files = [p for p in found if _is_ours(p)]
+    skipped = [p.name for p in found if p not in files]
+    if skipped:
+        res.add("INFO", "입력", "우리가 만든 파일이 아니라 건너뛴다: " +
+                ", ".join(skipped[:8]))
     if not files:
         res.add("FAIL", "입력", f"검증할 .md 파일이 없다: {root}")
         return res
@@ -88,14 +103,24 @@ def validate(root, cfg: dict, baseline: dict | None = None) -> Result:
 
     _cases(res, pat, body_by_file)
     _stars(res, pat, whole, baseline)
-    _mnemonics(res, pat, body_by_file)
+    _mnemonics(res, pat, body_by_file,
+               bool(cfg["preserve"]["mnemonic"].get("warn_bare", False)))
     _color(res, whole, baseline, cfg)
     _sidenotes(res, cfg, body_by_file)
-    _footnotes(res, pat, body_by_file)
+    _footnotes(res, pat, body_by_file, bool((baseline or {}).get("partial")))
     _structure(res, body_by_file)
+    _outline(res, text_by_file,
+             cfg["validation"].get("severity", {}).get("outline_missing", "WARN"))
+    _roman_flow(res, body_by_file)
+    _emphasis_pages(res, cfg, baseline)
+    _mnemonic_articles(res, cfg, pat, body_by_file)
     _noise(res, cfg, whole, baseline)
     _extraction_qa(res, cfg, body_by_file)
     _frontmatter(res, pat, text_by_file)
+    if (baseline or {}).get("partial"):
+        res.counts["partial"] = True
+        res.add("INFO", "범위", "쪽 범위를 잘라 돌렸다. 범위 밖과 짝이 맞지 않는 "
+                                "각주·참조는 WARN 으로 낮췄다.")
     return res
 
 
@@ -131,15 +156,24 @@ def _stars(res, pat, whole, baseline):
         return
     want = baseline["stars"]
     res.counts["stars_baseline"] = want
-    if found != want:
+    if found < want:
         res.add("FAIL", "5.2 별표",
-                f"별표 개수 불일치: 원본 {want} vs 변환 {found} (차이 {found - want:+})")
+                f"별표가 {want - found}건 사라졌다 (원본 {want} vs 변환 {found}). "
+                f"중요 판례 표시가 없어지면 판례 등급을 매길 근거가 사라진다.")
+    elif found > want:
+        # 원본은 한 줄 안에서만 셀 수 있다. 줄을 넘어 끊긴 사건번호
+        # ('91' / '다43176*')를 문단을 이으며 되붙이면 변환본이 더 많아진다.
+        # 잃은 것이 없으므로 통과로 본다. 지침 §5.2 의 '불일치=FAIL' 을 그대로
+        # 따르지 않은 것이라 이유를 남긴다.
+        res.add("INFO", "5.2 별표",
+                f"변환본이 {found - want}건 많다 (원본 {want} vs 변환 {found}). "
+                f"줄을 넘어 끊긴 사건번호를 되붙여 살아난 것으로, 잃은 것은 없다.")
     else:
         res.add("INFO", "5.2 별표", f"원본·변환 모두 {want}건으로 일치")
 
 
 # ── 5.3 두문자 (교차검증은 crosscheck 에서) ──────────────────────
-def _mnemonics(res, pat, bodies):
+def _mnemonics(res, pat, bodies, warn_bare=False):
     for path, text in bodies.items():
         for m in pat.mnemonic.finditer(text):
             body = m.group("body")
@@ -149,27 +183,71 @@ def _mnemonics(res, pat, bodies):
             res.mnemonic_context.setdefault(body, []).append(
                 f"{path.name}: {_ctx(text, m.start(), m.end())}")
     res.counts["mnemonics"] = len(res.mnemonics)
+    _bare_mnemonics(res, pat, bodies, warn_bare)
+
+
+def _bare_mnemonics(res, pat, bodies, cfg_warn_bare=False):
+    """대괄호를 잃은 두문자 후보 (§2.2).
+
+    OCR 이 대괄호를 통째로 흘리면 `확객시젠[종확나시]` 처럼 앞말이 맨몸으로
+    남는다. 괄호를 우리가 지어내면 안 되므로(§4.8), 자리만 짚어 사람에게 넘긴다.
+    """
+    if not cfg_warn_bare:
+        return
+    # 각주 참조 [^n] 과 조문 인용 [제265조] 는 두문자가 아니다.
+    rx = re.compile(r"(?<![\[`가-힣])([가-힣]{3,6})\s*`?\[(?!\^|제\s*\d)")
+    hits = 0
+    for path, text in bodies.items():
+        for m in rx.finditer(text):
+            token = m.group(1)
+            if token in res.mnemonics or len(token) < 3:
+                continue
+            hits += 1
+            if hits <= 12:
+                res.add("WARN", "2.2 두문자",
+                        f"대괄호를 잃은 두문자 후보: `{token}` — 괄호를 지어내지 "
+                        f"않았다. 원문을 보고 사람이 정할 것",
+                        _ctx(text, m.start(1), m.end(1)), path.name)
+    res.counts["bare_mnemonic_suspects"] = hits
 
 
 # ── 5.4 색상 강조 보존 ───────────────────────────────────────────
 def _color(res, whole, baseline, cfg):
-    found = len(_EMPH.findall(whole))
-    res.counts["emphasis"] = found
-    if not baseline or "colored_spans" not in baseline:
-        res.add("INFO", "5.4 색상", f"강조 마크업 {found}건. 원본 span 대조본이 없다.")
+    """강조 보존을 **글자 수**로 견준다.
+
+    span 수와 마크업 덩어리 수는 단위가 다르다. 이어진 span 여럿이 마크업 하나로
+    합쳐지므로(그게 맞는 동작이다) 개수끼리 견주면 늘 크게 어긋난 것처럼 보인다.
+    글자 수는 합쳐져도 변하지 않는다.
+    """
+    runs = _EMPH.findall(whole)
+    found_chars = sum(len(r.strip()) for r in runs)
+    res.counts["emphasis"] = len(runs)
+    res.counts["emphasis_chars"] = found_chars
+    if not baseline or "colored_chars" not in baseline:
+        res.add("INFO", "5.4 색상",
+                f"강조 마크업 {len(runs)}덩어리 / {found_chars}자. 원본 대조본이 없다.")
         return
-    want = baseline["colored_spans"]
-    res.counts["colored_spans_baseline"] = want
+    # 강조는 두 번 옮겨진다. 원본 span → 줄 글자(==) → 결과물.
+    # 헤딩 제목으로 들어간 것은 마크업이 걷히지만 사라진 게 아니라 구조가 담은
+    # 것이므로 되더한다. 그리고 **잃은 것만** 본다 — 이어진 span 이 한 덩어리로
+    # 합쳐지면서 사이의 구분자까지 안에 들어가 글자 수가 조금 느는 것은
+    # 보존에 문제가 없다.
+    origin = baseline["colored_chars"]
+    absorbed = int(baseline.get("absorbed", 0))
+    kept = found_chars + absorbed
+    res.counts["colored_chars_origin"] = origin
+    res.counts["colored_chars_kept"] = kept
+    res.counts["colored_chars_in_headings"] = absorbed
     colors = baseline.get("distinct_colors", 0)
-    if want == 0:
-        res.add("WARN", "5.4 색상", "원본에 유채색 span 이 없다. 강조색 없는 판본인지 "
+    if origin == 0:
+        res.add("WARN", "5.4 색상", "원본에 유채색이 없다. 강조색 없는 판본인지 "
                                     "확인할 것.")
         return
-    err = abs(found - want) / want
-    if err > 0.05:
+    lost = (origin - kept) / origin
+    if lost > 0.05:
         res.add("WARN", "5.4 색상",
-                f"강조 개수 오차 {err * 100:.1f}% (원본 span {want} vs 마크업 {found}). "
-                f"인접 span 병합 때문일 수 있으니 palette.md 와 함께 볼 것.")
+                f"강조가 {lost * 100:.1f}% 사라졌다 (원본 {origin}자 vs 남은 {kept}자"
+                f" = 마크업 {found_chars} + 제목흡수 {absorbed}). palette.md 와 함께 볼 것.")
     if colors > 3:
         res.add("WARN", "5.4 색상", f"색상 팔레트가 {colors}종이다. 근접색 병합이 필요하다 "
                                     f"(preserve.color.merge_distance).")
@@ -177,23 +255,42 @@ def _color(res, whole, baseline, cfg):
 
 # ── 5.5 여백 마커 검사 ───────────────────────────────────────────
 def _sidenotes(res, cfg, bodies):
+    """§5.5 — 옆번호가 본문에 섞여 들어갔는지.
+
+    옆번호는 좌표로 떼어 낸다(버리든 남기든). 그러니 **본문 글자 속에 남아
+    있는 `sE-n` 은 전부 새어 들어온 것**이다. 이게 §4.3 이 경고한 사고다:
+    `sE-8` + `1.` 이 붙으면 `sE-81` 이 되어 참조가 바뀐다.
+    백틱 안에 있는 것은 우리가 헤딩 옆에 일부러 붙인 것이므로 뺀다.
+    """
     suspect_rx = re.compile(cfg["legend"]["sidenote"]["merge_suspect"])
-    found, bad = [], 0
+    tagged, leaked = 0, 0
     for path, text in bodies.items():
-        found += _SIDE.findall(text)
-        for m in suspect_rx.finditer(text):
-            bad += 1
+        for m in _SIDE.finditer(text):
+            in_backticks = (text[max(0, m.start() - 1):m.start()] == "`"
+                            and text[m.end():m.end() + 1] == "`")
+            if in_backticks:
+                tagged += 1
+                if suspect_rx.search(m.group(0)):
+                    leaked += 1
+                    res.add("FAIL", "5.5 여백 마커",
+                            f"자릿수가 이상한 옆번호: `{m.group(0)}` "
+                            f"(sE-8 + 1. → sE-81 꼴)",
+                            _ctx(text, m.start(), m.end()), path.name)
+                continue
+            leaked += 1
             res.add("FAIL", "5.5 여백 마커",
-                    f"본문 병합 의심: `{m.group(0)}` (sE-8 + 1. → sE-81 꼴)",
+                    f"옆번호가 본문에 섞였다: `{m.group(0)}` — 좌표 분리가 "
+                    f"어긋났다는 뜻이고, 붙은 글자만큼 참조 번호가 바뀐다",
                     _ctx(text, m.start(), m.end()), path.name)
-    res.counts["sidenotes"] = len(found)
-    res.counts["sidenote_merged"] = bad
-    if found and not bad:
-        res.add("INFO", "5.5 여백 마커", f"{len(found)}건 추출, 병합 의심 0건")
+    res.counts["sidenotes"] = tagged
+    res.counts["sidenote_merged"] = leaked
+    if not leaked:
+        res.add("INFO", "5.5 여백 마커",
+                f"본문에 새어 든 옆번호 0건 (헤딩에 붙인 것 {tagged}건)")
 
 
 # ── 5.6 각주 무결성 ──────────────────────────────────────────────
-def _footnotes(res, pat, bodies):
+def _footnotes(res, pat, bodies, partial=False):
     refs, defs = Counter(), Counter()
     where = defaultdict(list)
     for path, text in bodies.items():
@@ -210,16 +307,23 @@ def _footnotes(res, pat, bodies):
 
     orphan_def = sorted(set(defs) - set(refs))
     orphan_ref = sorted(set(refs) - set(defs))
-    res.counts["footnote_mismatch"] = len(orphan_def) + len(orphan_ref)
+    # §5.8 은 '각주 참조/정의 불일치 0건' 을 FAIL 기준으로 든다. 다만 두 갈래의
+    # 무게가 다르다. 지침 §2.5 가 지키라는 것은 **각주를 버리지 않는 것**이다.
+    #   정의 없는 참조 → 각주 본문이 사라졌다. 되돌릴 수 없는 유실이므로 FAIL.
+    #   참조 없는 각주 → 본문의 위첨자를 못 살렸을 뿐, 각주는 섹션 끝에 그대로
+    #                    있다. 잃은 것이 없으므로 WARN 으로 둔다.
+    # 이 구분은 지침 표를 그대로 따르지 않은 것이라, 리포트에 이유를 적는다.
+    res.counts["footnote_mismatch"] = len(orphan_ref)
+    res.counts["footnote_unlinked"] = len(orphan_def)
+    level = "WARN" if partial else "FAIL"
     if orphan_ref:
-        res.add("FAIL", "5.6 각주",
+        res.add(level, "5.6 각주",
                 f"정의 없는 참조 {len(orphan_ref)}건 — 각주 본문이 사라졌다: "
                 f"{', '.join(str(n) for n in orphan_ref[:20])}")
     if orphan_def:
-        # 각주는 버리지 않았다. 다만 참조를 못 살렸으므로 §5.8 은 불일치로 본다.
-        res.add("FAIL", "5.6 각주",
-                f"참조 없는 각주 {len(orphan_def)}건 — 본문의 위첨자 번호를 못 살렸다"
-                f"(각주 자체는 버리지 않고 섹션 끝에 남겨 뒀다): "
+        res.add("WARN", "5.6 각주",
+                f"참조를 못 이은 각주 {len(orphan_def)}건 — 각주 본문은 섹션 끝에 "
+                f"그대로 있다(잃은 것 없음). 본문의 위첨자 번호를 못 살렸을 뿐이다: "
                 f"{', '.join(str(n) for n in orphan_def[:20])}")
     dup = sorted(n for n, c in defs.items() if c > 1)
     if dup:
@@ -268,6 +372,128 @@ def _structure(res, bodies):
                     "학설은 있는데 判例/검토가 없다 (학판검 세트 누락 의심)", "", path.name)
     res.counts["empty_sections"] = empty
     res.counts["heading_jumps"] = jumps
+
+
+# ── V1 목차 ↔ 헤딩 대조 ─────────────────────────────────────────
+def _outline(res, texts, level="WARN"):
+    """맨 앞 목차 줄에 적힌 항목이 헤딩으로 다 서 있는가.
+
+    '의의 - 소송물 - 시효중단 - 기판력' 처럼 저자가 첫 줄에 절 이름을 늘어놓는다.
+    그중 하나가 헤딩으로 안 잡혔다면 그 절은 문단 속에 묻힌 것이다. 뒤 AI 가
+    목차별 요약을 할 때 통째로 빠지므로 FAIL 로 잡는다.
+    """
+    missing_total = 0
+    for path, text in texts.items():
+        m = _FM.match(text)
+        if not m:
+            continue
+        head, body = m.group(0), text[m.end():]
+        om = re.search(r"^outline: \[(.*)\]$", head, re.M)
+        if not om:
+            continue
+        wanted = [x.strip().strip('"') for x in om.group(1).split(",") if x.strip()]
+        joined = " ".join(_key(t) for _, t in _HEAD.findall(body))
+        missing = [w for w in wanted if _key(w) and _key(w) not in joined]
+        if missing and len(missing) < len(wanted):
+            # 일부만 헤딩으로 섰다 = 절 목록인데 구멍이 났다. 이것이 §P0-1 의 증상이다.
+            missing_total += len(missing)
+            res.add(level, "5.7 목차",
+                    f"목차에 있는데 헤딩이 없다: {', '.join(missing[:8])}", "", path.name)
+        elif missing:
+            # 하나도 안 맞는다 = 절 목차가 아니라 문단 목차다
+            # ('의의 - 내용 - 예외 - 효과 + 관련논점'). 오류가 아니다.
+            res.add("INFO", "5.7 목차",
+                    f"목차 줄이 헤딩과 하나도 안 맞는다 (문단 목차로 보인다): "
+                    f"{', '.join(wanted[:6])}", "", path.name)
+    res.counts["outline_missing"] = missing_total
+
+
+def _key(text: str) -> str:
+    """헤딩 대조용 열쇠. 마크업·번호·공백을 털어낸 알맹이만.
+
+    **양쪽을 똑같이 턴다.** OCR 잡글자는 헤딩에만 붙는 게 아니라 목차 띠에도
+    붙는다('仁j 의의'). 한쪽만 다듬으면 둘이 영영 안 만나 없는 불일치를
+    보고한다. 그래서 앞의 한글 아닌 글자는 어느 쪽이든 떼고 견준다.
+    """
+    text = re.sub(r"[=*`]+", "", text or "")
+    text = re.sub(r"^[^가-힣]{0,6}", "", text)
+    return re.sub(r"\s+", "", text).strip()
+
+
+# ── V5 로마자 절 번호가 이어지는가 ──────────────────────────────
+def _roman_flow(res, bodies):
+    """I → II → III 가 건너뛰면 그 절이 헤딩으로 안 잡힌 것이다 (WARN).
+
+    OCR 이 III 을 Ill 로 흘리면 딱 그 번호만 빠진다. 그래서 번호가 튀는 것은
+    거의 언제나 유실 신호다. 다만 원본이 원래 건너뛰는 일도 있어 WARN 이다.
+    """
+    order = ["I", "II", "III", "IV", "V", "VI", "VII", "VIII", "IX", "X"]
+    gaps = 0
+    for path, text in bodies.items():
+        seen = []
+        for _, title in _HEAD.findall(text):
+            mm = re.match(r"^\s*(?:[=*`]+)?\s*([IVX]{1,5})\s*[.)]", title)
+            if mm and mm.group(1) in order:
+                seen.append(mm.group(1))
+        for a, b in zip(seen, seen[1:]):
+            if order.index(b) > order.index(a) + 1:
+                gaps += 1
+                res.add("WARN", "5.7 로마자",
+                        f"절 번호가 {a} → {b} 로 건너뛴다. 사이 번호가 헤딩으로 "
+                        f"안 잡혔을 수 있다.", "", path.name)
+    res.counts["roman_gaps"] = gaps
+
+
+# ── V3 표준판례 쪽의 강조 개수 ──────────────────────────────────
+def _emphasis_pages(res, cfg, baseline):
+    """표준판례가 있는 쪽인데 강조가 거의 없으면 색을 못 읽은 것이다.
+
+    본문은 멀쩡해 보여도 답안 현출부가 통째로 사라진 것이라 FAIL 이다.
+    """
+    base = baseline or {}
+    emph = base.get("emphasis_by_page")
+    pages = base.get("standard_pages")
+    if emph is None or pages is None:
+        return
+    if base.get("color_source") != "image":
+        # 이 검사는 **쪽 그림에서 색을 읽는 경우**의 실패를 잡는 것이다.
+        # 글자에 색이 박힌 PDF 는 색을 흘릴 자리가 없어 셀 이유도 없다.
+        return
+    need = int(cfg["validation"].get("fail_on", {})
+               .get("emphasis_per_standard_page", 0))
+    res.counts["standard_pages"] = len(pages)
+    res.counts["emphasis_total"] = sum(emph.values())
+    if need <= 0:
+        return          # 색상 추출이 취소되어 이 검사도 내렸다 (수정 요청 #01 개정)
+    thin = [(p, emph.get(str(p), 0)) for p in pages if emph.get(str(p), 0) < need]
+    res.counts["emphasis_thin_pages"] = len(thin)
+    if thin:
+        head = ", ".join(f"p.{p}({n})" for p, n in thin[:12])
+        res.add("FAIL", "5.4 강조",
+                f"표준판례가 있는데 강조(==)가 {need}개 미만인 쪽 {len(thin)}곳: "
+                f"{head}{' …' if len(thin) > 12 else ''}. "
+                f"`preserve.color.chroma_min`·`min_ratio` 를 낮추고 "
+                f"`_reports/palette.md` 의 예문을 확인할 것.")
+
+
+# ── V4 조문번호가 두문자로 새어 들어갔는가 ──────────────────────
+def _mnemonic_articles(res, cfg, pat, bodies):
+    """`제265조` 같은 조문번호가 두문자 백틱 안에 있으면 안 된다 (§P1-2).
+
+    두문자는 답안에 그대로 옮겨 적는 암기 문자열이다. 조문번호가 섞이면 뒤
+    AI 가 그것을 암기 대상으로 오해한다.
+    """
+    rx = re.compile(cfg["preserve"]["mnemonic"].get(
+        "article_pattern", r"^제?\s*\d+\s*조"))
+    bad = 0
+    for path, text in bodies.items():
+        for m in re.finditer(r"`\[([^\]\n]{1,60})\]`", text):
+            if rx.match(m.group(1).strip()):
+                bad += 1
+                res.add("FAIL", "5.3 두문자",
+                        f"조문번호가 두문자로 잡혔다: `[{m.group(1)}]`",
+                        _ctx(text, m.start(), m.end()), path.name)
+    res.counts["mnemonic_articles"] = bad
 
 
 # ── 잔여 노이즈 (§5.8 WARN) ──────────────────────────────────────
@@ -346,21 +572,24 @@ def reports(res: Result, cfg: dict) -> dict[str, str]:
     L.append("|---|---|---:|---|")
     rows = [
         ("사건번호 형식 오류", "0건", c.get("case_errors", 0), c.get("case_errors", 0) == 0),
-        ("별표 개수 불일치", "0건",
-         _diff(c.get("stars"), c.get("stars_baseline")),
-         c.get("stars_baseline") is None or c.get("stars") == c.get("stars_baseline")),
-        ("각주 참조/정의 불일치", "0건", c.get("footnote_mismatch", 0),
-         c.get("footnote_mismatch", 0) == 0),
+        ("별표 유실", "0건",
+         max(0, (c.get("stars_baseline") or 0) - (c.get("stars") or 0))
+         if c.get("stars_baseline") is not None else "대조 불가",
+         c.get("stars_baseline") is None or c.get("stars", 0) >= c.get("stars_baseline", 0)),
+        ("각주 — 정의 없는 참조(유실)", "0건", c.get("footnote_mismatch", 0),
+         c.get("footnote_mismatch", 0) == 0 or c.get("partial")),
         ("여백 마커 병합 의심", "0건", c.get("sidenote_merged", 0),
          c.get("sidenote_merged", 0) == 0),
     ]
     for name, want, got, ok in rows:
         L.append(f"| {name} | {want} | {got} | {'✅ PASS' if ok else '❌ FAIL'} |")
     warn_noise = c.get("noise_per_page", 0) <= float(cfg["validation"]["warn_on"]["noise_per_page"])
+    L.append(f"| 각주 — 참조를 못 이음(내용은 있음) | 참고 | "
+             f"{c.get('footnote_unlinked', 0)} | {'✅' if not c.get('footnote_unlinked') else '⚠️ WARN'} |")
     L.append(f"| 잔여 노이즈 | 쪽당 {cfg['validation']['warn_on']['noise_per_page']}건 이하 | "
              f"{c.get('noise_per_page', 0)} | {'✅' if warn_noise else '⚠️ WARN'} |")
-    L.append(f"| 색상 강조 개수 오차 | 5% 이하 | {c.get('emphasis', 0)} 마크업 / "
-             f"{c.get('colored_spans_baseline', '-')} span | "
+    L.append(f"| 색상 강조 유실 | 5% 이하 | 원본 {c.get('colored_chars_origin', '-')}자 "
+             f"→ 남음 {c.get('colored_chars_kept', '-')}자 | "
              f"{'✅' if not any(f.check.startswith('5.4') and f.level == 'WARN' for f in res.findings) else '⚠️ WARN'} |")
     L.append("")
     L.append("> 두문자 일치(§5.3)는 두 소스가 모두 있어야 판정한다. "
