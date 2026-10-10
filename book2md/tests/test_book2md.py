@@ -1140,6 +1140,25 @@ class 특허법_테마(unittest.TestCase):
         self.assertIn("본문이다.", parts[1].text())
         self.assertNotIn("정의다.", parts[1].text())
 
+    def test_한_판_늦은_북마크를_깁는다(self):
+        """빠진 논점을 넣고 뒤 번호를 다시 매긴다. 이름이 겹치는 항목('우선권주장 제도'
+        와 '국내우선권주장 제도')은 번호를 뗀 전체 제목으로만 맞춘다."""
+        from book2md.split import patch_outline
+        toc = [[1, "CHAPTER 3 | 출원제도", 90], [2, "08 분할출원", 116],
+               [2, "09 변경출원", 121], [2, "10 우선권주장 제도", 127],
+               [2, "11 국내우선권주장 제도", 130], [1, "CHAPTER 4 | 특허권", 154],
+               [2, "01 특허권 일반", 154]]
+        got = patch_outline(toc, [{"insert": "분리출원", "page": 121},
+                                  {"title": "변경출원", "page": 124},
+                                  {"title": "우선권주장 제도", "rename": "조약우선권주장 제도"}],
+                            renumber=True)
+        self.assertEqual([t for lv, t, p in got if lv == 2],
+                         ["01 분할출원", "02 분리출원", "03 변경출원", "04 조약우선권주장 제도",
+                          "05 국내우선권주장 제도", "01 특허권 일반"])
+        self.assertEqual([p for lv, t, p in got if lv == 2][1:3], [121, 124])
+        with self.assertRaises(ValueError):
+            patch_outline(toc, [{"title": "없는 논점", "page": 1}])
+
     def test_번호만_세는_사례집(self):
         """'OOl 특허출원: …' — OCR 이 흘린 0·1 을 되돌려 문제 번호가 파일 이름이 된다."""
         prof = get_profile(self.cfg, "casebook")

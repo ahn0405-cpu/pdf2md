@@ -55,8 +55,9 @@ class Block:
 
 
 class Structurer:
-    def __init__(self, cfg: dict, prof: dict, pat: Patterns):
+    def __init__(self, cfg: dict, prof: dict, pat: Patterns, page_breaks=()):
         self.cfg, self.prof, self.pat = cfg, prof, pat
+        self._page_breaks = set(page_breaks or ())
         self.join = cfg.get("paragraph", {}).get("join", "space")
         self.flush_level = int(prof.get("footnote_flush_level", 4))
         self.blocks: list[Block] = []
@@ -118,6 +119,13 @@ class Structurer:
 
     # ── 입력 ────────────────────────────────────────────────────
     def feed(self, page: Page, footnotes: list[Footnote]) -> None:
+        if page.number in self._page_breaks:
+            # 파일 경계가 될 쪽 — 앞 쪽의 문단·박스가 이 쪽 첫 줄을 삼키지 않게 닫는다
+            if self._bonus is not None:
+                self._close_bonus(self._para_page)
+            self._flush_para()
+            self._page = page.number
+            self._flush_footnotes()      # 앞 쪽들의 각주는 앞 논점에서 끝낸다
         self._page = page.number
         self._pending.extend(footnotes)
         # 옆번호는 그 쪽 안에서만 짝짓는다. 남으면 버리지 않고 다음 쪽으로

@@ -18,7 +18,7 @@ from .model import Page, dump_pages, load_pages
 from .normalize import Normalizer
 from .parsers import get_parser
 from .patterns import Patterns
-from .split import split, write as write_parts
+from .split import patch_outline, split, write as write_parts
 from .structure import Structurer, Block, render
 from .validate import validate, reports as validation_reports, load_baseline
 
@@ -190,7 +190,12 @@ class Pipeline:
     # ── 3. 구조화 ───────────────────────────────────────────────
     def structure(self) -> None:
         collector = FootnoteCollector(self.cfg, self.pat)
-        st = Structurer(self.cfg, self.prof, self.pat)
+        outline = self._outline()
+        # 북마크로 자를 쪽에서는 앞 쪽에서 이어지던 문단을 끊는다. 안 끊으면 새 논점의
+        # 첫 줄(제목)이 앞 문단에 붙어 앞 파일로 간다 — 블록은 시작한 쪽에 속한다.
+        starts = {p for lv, _, p in outline
+                  if lv == int(self.prof.get("outline_level", 2))} if outline else set()
+        st = Structurer(self.cfg, self.prof, self.pat, page_breaks=starts)
         pages = 0
         dropped: list[tuple[int, str, str]] = []
         for page in load_pages(self.normalized):
@@ -220,6 +225,19 @@ class Pipeline:
         fns = sum(1 for b in blocks if b.kind == "footnotes")
         self.log(f"[구조화] {pages}쪽 → 블록 {len(blocks)} (헤딩 {heads}, 각주블록 {fns})")
 
+    def _outline(self) -> list | None:
+        """split: outline 일 때 기운 북마크. 아니거나 북마크가 없으면 None."""
+        if self.prof.get("split") != "outline":
+            return None
+        import pymupdf
+        with pymupdf.open(self.pdf) as doc:
+            outline = doc.get_toc()
+        if not outline:
+            return None
+        return patch_outline(outline, self.prof.get("outline_patch"),
+                             int(self.prof.get("outline_level", 2)),
+                             bool(self.prof.get("outline_renumber")))
+
     def _update_baseline(self, **fields) -> None:
         """뒤 단계에서 알게 된 값을 baseline 에 적어 둔다."""
         if not self.baseline.exists():
@@ -232,13 +250,9 @@ class Pipeline:
     # ── 4. 분할 ─────────────────────────────────────────────────
     def split(self) -> list[str]:
         blocks = self._load_blocks()
-        outline = None
-        if self.prof.get("split") == "outline":
-            import pymupdf
-            with pymupdf.open(self.pdf) as doc:
-                outline = doc.get_toc()
-            if not outline:
-                self.log("[분할] PDF 에 북마크가 없다 — 장·절 제목으로 나눈다")
+        outline = self._outline()
+        if self.prof.get("split") == "outline" and not outline:
+            self.log("[분할] PDF 에 북마크가 없다 — 장·절 제목으로 나눈다")
         parts = split(blocks, self.prof, outline)
         written, removed = write_parts(parts, self.out, self.prof,
                                        self.parser_name, "PENDING")
