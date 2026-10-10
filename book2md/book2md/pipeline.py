@@ -232,7 +232,14 @@ class Pipeline:
     # ── 4. 분할 ─────────────────────────────────────────────────
     def split(self) -> list[str]:
         blocks = self._load_blocks()
-        parts = split(blocks, self.prof)
+        outline = None
+        if self.prof.get("split") == "outline":
+            import pymupdf
+            with pymupdf.open(self.pdf) as doc:
+                outline = doc.get_toc()
+            if not outline:
+                self.log("[분할] PDF 에 북마크가 없다 — 장·절 제목으로 나눈다")
+        parts = split(blocks, self.prof, outline)
         written, removed = write_parts(parts, self.out, self.prof,
                                        self.parser_name, "PENDING")
         note = f", 지난 결과 {len(removed)}개 지움" if removed else ""

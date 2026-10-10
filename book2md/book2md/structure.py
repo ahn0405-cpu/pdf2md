@@ -20,6 +20,8 @@ _LIST_HEAD = re.compile(
     r"^(?:[-•‣▪·]|\(\s*\d+\s*\)|\d+\s*\)|[가-하]\s*[.)]|[①-⑳]|[ⅰ-ⅹ]\s*\)|\(\s*[ⅰ-ⅹ]\s*\))\s*"
 )
 _SENT_END = re.compile(r"(?:[.?!]|다\.|음\.|함\.|[」』’”\)])\s*$")
+# 번호만 세는 사례집의 문제 번호에서 OCR 이 흘린 0·1 ('OOl' → '001')
+_OCR_DIGITS = str.maketrans("OoQDlI|", "0000111")
 _CJK = re.compile(r"[가-힣ㄱ-ㅎㅏ-ㅣ぀-ヿ一-鿿]")
 _NUM_ITEM = re.compile(r"^(\d{1,2})\s*\.\s*")
 #: 색으로 감싼 제목이 줄 안에 박혀 있는 자리 (§6.1). 줄 맨 앞일 수도 있고,
@@ -231,12 +233,17 @@ class Structurer:
     def _feed_casebook(self, text: str, plain: str, line, page_no: int) -> None:
         if self._problem_rx:
             m = self._problem_rx.match(plain)
-            if m and m.group(3).strip():
+            # 묶음 글자 없이 번호만 세는 사례집도 있다('001 특허출원: …'). 그때는
+            # 무늬의 묶음이 둘(번호·제목)이고, OCR 이 0·1 을 O·l 로 흘린 번호를 되돌린다.
+            bare_no = m is not None and m.re.groups == 2
+            if m and m.group(m.re.groups).strip():
                 self._in_prompt = False
-                title = m.group(3).strip()
+                title = m.group(m.re.groups).strip()
                 score, title = _split_score(self._score_rx, title, self._score_max)
+                no = (m.group(1).translate(_OCR_DIGITS) if bare_no
+                      else f"{m.group(1)}-{m.group(2)}")
                 # 문제 번호 옆 대괄호는 논점 태그이지 두문자가 아니다 (§6.2).
-                self._heading(2, f"{m.group(1)}-{m.group(2)}. {title}",
+                self._heading(2, f"{no}. {title}",
                               page_no, score=score, mnemonics=False)
                 self._last_problem = self.blocks[-1]
                 return
@@ -439,7 +446,8 @@ class Structurer:
         목차 띠가 절 이름이라고 말해 주면 그쪽을 믿는다. 박스 제목은 목차에
         오르지 않는다.
         """
-        if self._outline_head(text):
+        # 강조 표시만 있던 줄은 걷어내면 빈 글자가 된다('====').
+        if not text or self._outline_head(text):
             return None
         first = text[0]
         rest = text[1:].strip()

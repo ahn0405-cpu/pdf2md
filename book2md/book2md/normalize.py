@@ -110,8 +110,10 @@ class Normalizer:
         self.date_hangul = n.get("date_trailing_hangul", "warn")
         self.stars = "".join(cfg["preserve"]["star"]["chars"])
         self.allowed = _allowed_set(cfg.get("noise_scan", {}))
+        # page 를 주면 그 쪽에서만, whole 이면 줄 전체가 find 와 같을 때만 바꾼다.
+        # 흔한 낱말 하나만 남은 줄('특유청구항')을 고칠 때 다른 자리를 건드리지 않으려고.
         self.corrections = [
-            (c["find"], c.get("to", ""), c.get("note", ""))
+            (c["find"], c.get("to", ""), c.get("note", ""), c.get("page"), bool(c.get("whole")))
             for c in (cfg.get("corrections") or []) if c.get("find")
         ]
 
@@ -175,7 +177,11 @@ class Normalizer:
         OCR 이 글자를 삼켜 버려 프로그램이 되살릴 수 없는 것들이 있다.
         무엇으로 되돌릴지는 원문을 본 사람만 안다.
         """
-        for find, to, note in self.corrections:
+        for find, to, note, page, whole in self.corrections:
+            if page is not None and page != page_no:
+                continue
+            if whole and text.strip() != find:
+                continue
             idx = text.find(find)
             while idx >= 0:
                 changes.append(Change(page_no, "correction", find, to,

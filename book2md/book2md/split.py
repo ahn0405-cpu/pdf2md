@@ -8,6 +8,7 @@
 """
 from __future__ import annotations
 
+import bisect
 import datetime as _dt
 import re
 from dataclasses import dataclass, field
@@ -32,9 +33,12 @@ class Part:
         return render(self.blocks)
 
 
-def split(blocks: list[Block], prof: dict) -> list[Part]:
+def split(blocks: list[Block], prof: dict, outline: list | None = None) -> list[Part]:
     mode = prof.get("split", "chapter")
     limit = int(prof.get("split_max_bytes", 0))
+    if mode == "outline" and outline:
+        # 북마크 순번이 곧 파일 번호다. 다시 매기지 않는다.
+        return _split_outline(blocks, outline, int(prof.get("outline_level", 2)))
     if mode == "group":
         parts = _split_group(blocks)
     elif any(b.kind == "heading" and b.level == 2 for b in blocks):
@@ -49,6 +53,32 @@ def split(blocks: list[Block], prof: dict) -> list[Part]:
     for k, part in enumerate(parts, 1):
         part.index = k
     return parts
+
+
+def _split_outline(blocks, outline, level: int) -> list[Part]:
+    """PDF 북마크(목차)의 쪽 범위로 자른다.
+
+    스캔 교재는 본문의 논점 제목이 OCR 로 깨지고('01' → '07'), 앞머리 차례와
+    장 첫머리 목차 쪽에도 같은 제목이 줄줄이 실려 제목 무늬로는 경계가 안 선다.
+    출판사가 넣은 북마크가 있으면 그것이 정답이다. `level` 의 항목마다 한 파일,
+    그보다 위 항목은 장(chapter)으로 적는다. 첫 항목 앞의 쪽은 `머리`(0번)다.
+    outline 은 [(수준, 제목, 1-based 쪽)] — PyMuPDF get_toc() 그대로.
+    """
+    starts, chapter = [], ""
+    for lv, title, page in outline:
+        if lv < level:
+            chapter = title.strip()
+        elif lv == level:
+            starts.append((page, title.strip(), chapter))
+    if not starts:
+        return [Part(index=1, title="전체", blocks=list(blocks))]
+    head = Part(index=0, title="머리")
+    parts = [Part(index=k, title=t, chapter=c) for k, (_, t, c) in enumerate(starts, 1)]
+    pages = [p for p, _, _ in starts]
+    for b in blocks:
+        k = bisect.bisect_right(pages, b.page or 0)
+        (parts[k - 1] if k else head).blocks.append(b)
+    return ([head] if head.blocks else []) + [p for p in parts if p.blocks]
 
 
 def _split_chapter(blocks) -> list[Part]:
@@ -167,6 +197,16 @@ def filename(part: Part, prof: dict) -> str:
     stem = _SAFE.sub("", part.title)[:40] or f"part{part.index}"
     if prof.get("split") == "group":
         return f"{part.chapter or 'X'}_{stem}.md"
+    if prof.get("split") == "outline":
+        return f"{part.index:03d}_{stem}.md"
+    if prof.get("name") == "casebook" and prof.get("split") == "chapter":
+        # 번호만 세는 사례집('001. 특허출원: …')은 파일 이름도 문제 번호로 — 순번은
+        # 번호가 하나만 빠져도 그 뒤가 전부 어긋난다.
+        m = re.match(r"^(\d{3})\.\s*(.*)$", part.title)
+        if m:
+            return f"{m.group(1)}_{_SAFE.sub('', m.group(2))[:40]}.md"
+        if part.title == "머리":
+            return "000_머리.md"
     return f"{part.index:02d}_{stem}.md"
 
 

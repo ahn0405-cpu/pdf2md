@@ -1107,6 +1107,59 @@ class 사람이_확정한_정정(unittest.TestCase):
 
 
 
+class 특허법_테마(unittest.TestCase):
+    """config-patent.yaml 층 — 북마크 분할, 번호만 세는 사례집, 쪽 지정 정정"""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.cfg = load_config([ROOT / "config.yaml", ROOT / "config-patent.yaml"])
+        cls.pat = Patterns.build(cls.cfg)
+
+    def _feed(self, prof, pages):
+        st = Structurer(self.cfg, prof, self.pat)
+        for no, rows in pages:
+            st.feed(Page(number=no, kind="layout",
+                         lines=[Line(text=t, size=9.0, y0=100 + 16 * k, y1=110 + 16 * k)
+                                for k, t in enumerate(rows)]), [])
+        return st.finish()
+
+    def test_북마크_쪽_범위로_나눈다(self):
+        """본문 제목이 '07 특히요건 일반' 처럼 깨져도 파일은 북마크 순번·제목을 따른다.
+        앞머리 차례 쪽의 논점 제목 줄은 경계가 되지 않는다."""
+        prof = get_profile(self.cfg, "textbook")
+        blocks = self._feed(prof, [(8, ["01 특허요건 일반", "02 발명의 정의"]),
+                                   (32, ["07 특히요건 일반", "본문이다."]),
+                                   (34, ["02 발명의 정의 (法 제2조 제1호)", "정의다."])])
+        outline = [[1, "CHAPTER 2 | 특허요건", 32], [2, "01 특허요건 일반", 32],
+                   [2, "02 발명의 정의 (법 제2조 제1호)", 34]]
+        parts = split(blocks, prof, outline)
+        names = [filename(p, prof) for p in parts]
+        self.assertEqual(names, ["000_머리.md", "001_01특허요건일반.md",
+                                 "002_02발명의정의법제2조제1호.md"])
+        self.assertEqual(parts[1].chapter, "CHAPTER 2 | 특허요건")
+        self.assertIn("본문이다.", parts[1].text())
+        self.assertNotIn("정의다.", parts[1].text())
+
+    def test_번호만_세는_사례집(self):
+        """'OOl 특허출원: …' — OCR 이 흘린 0·1 을 되돌려 문제 번호가 파일 이름이 된다."""
+        prof = get_profile(self.cfg, "casebook")
+        blocks = self._feed(prof, [(22, ["OOl 특허출원: 등록가능성 및 조치", "문제",
+                                         "甲은 발명을 하였다.", "답안",
+                                         "I. 설문(1)에 대하여", "1. 문제의 소재"]),
+                                   (26, ["002 특허출원: 등록가능성 및 조치", "문제", "乙이다."])])
+        heads = [b.text for b in blocks if b.kind == "heading"]
+        self.assertIn("001. 특허출원: 등록가능성 및 조치", heads)
+        self.assertIn("I. 설문(1)에 대하여", heads)
+        names = [filename(p, prof) for p in split(blocks, prof)]
+        self.assertEqual(names, ["001_특허출원등록가능성및조치.md", "002_특허출원등록가능성및조치.md"])
+
+    def test_쪽을_지정한_정정은_그_쪽_그_줄에만(self):
+        n = Normalizer(self.cfg, self.pat)
+        self.assertEqual(n.normalize_line("특유청구항", 430, []), "111 특유청구항")
+        self.assertEqual(n.normalize_line("특유청구항", 431, []), "특유청구항")
+        self.assertEqual(n.normalize_line("특유청구항에 관한 문제", 430, []), "특유청구항에 관한 문제")
+
+
 class 목차로_제목_되찾기(unittest.TestCase):
     """§6.1 — 오인식 글자를 표에 등록하는 대신, 문서가 스스로 답을 갖고 있다"""
 
