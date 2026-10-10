@@ -220,6 +220,11 @@ def 본다(행, 더):
 def 검사():
     """장 파일마다 — 아직 없는 논점, 기본서에 없는 두문자(오기를 잡는다)."""
     표 = 논점표()
+    확인 = set()                            # 원본 쪽으로 확인한 두문자 (references/두문자확인.md)
+    for l in (references / "두문자확인.md").read_text(encoding="utf-8").splitlines():
+        m = re.match(r"^\|\s*(\d+-\d+)\s*\|\s*(\[[^\]]+\])", l)
+        if m:
+            확인.add((m.group(1), m.group(2)))
     없음 = 쓴수 = 0
     for p in sorted(목차집.glob("CH*.md")):
         장 = int(re.match(r"CH(\d+)", p.name).group(1))
@@ -231,9 +236,13 @@ def 검사():
                 없음 += 1
                 continue
             쓴수 += 1
-            원문 = re.sub(r"[\s=`]", "", 본문(기본서파일(r)))
+            # 기본서는 두문자를 점으로 찍는다('[필.허.기]'). 점·공백·강조를 걷고 맞춘다.
+            # OCR 로 깨진 두문자('[법실남.소태]')는 여기 걸린다 — 원본 쪽으로 확인한 것이면 둔다.
+            원문 = re.sub(r"[\s=`.·]", "", 본문(기본서파일(r)))
             for d in re.findall(r"`(\[[^\]`]+\])`", 쓴것[r["장내번호"]]):
-                if re.sub(r"\s", "", d) not in 원문:
+                if (f"{장}-{r['장내번호']}", d) in 확인:
+                    continue
+                if re.sub(r"[\s.·]", "", d) not in 원문:
                     print(f"  두문자?  {장}-{r['장내번호']}  {d}  ({p.name} — 기본서에 없다)")
     print(f"\n목차집 논점 {쓴수}  ·  쓴 장 안에서 아직 없음 {없음}")
 
