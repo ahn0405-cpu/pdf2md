@@ -64,6 +64,7 @@
       "Bash(git log:*)",
       "Bash(git add:*)",
       "Bash(git fetch:*)",
+      "Bash(git push:*)",
       "Read(//home/user/pdf2md/**)",
       "Grep",
       "Glob"
