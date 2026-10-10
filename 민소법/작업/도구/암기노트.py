@@ -14,6 +14,7 @@ SKILL.md 가 BOLD 를 채점 키워드 단위로 10~15자 안에 끊게 한 까�
     python3 암기노트.py              노트가 있는 장 전부
     python3 암기노트.py 05 08        그 장만
     python3 암기노트.py 05 --화면    파일로 쓰지 않고 화면에
+    python3 암기노트.py 046 068     그 논점만 화면에 (세 자리는 논점 번호)
     python3 암기노트.py --전부       수록 기준을 끄고 모든 판례를
     python3 암기노트.py --검사       빈칸 없는 판시 · 15자 넘는 빈칸만 보고
 
@@ -340,6 +341,13 @@ def main():
     인자 = sys.argv[1:]
     화면, 전부, 검사 = "--화면" in 인자, "--전부" in 인자, "--검사" in 인자
     고른 = [a for a in 인자 if not a.startswith("--")]
+    논점 = [a for a in 고른 if len(a) == 3 and a.isdigit()]
+    if 논점:                             # 논점 미리보기 — 장 파일은 건드리지 않는다
+        for n in 논점:
+            for p in sorted(노트.glob(f"{n}*.md")):
+                글, _ = 논점쓰기(p, 전부)
+                print(글 or f"# {n} — 실을 것이 없다")
+        return
     대상 = [c for c in 장 if not 고른 or c[0] in 고른 or c[0].lstrip("0") in 고른]
     if 고른 and not 대상:
         sys.exit(f"그런 장이 없다: {' '.join(고른)} (01~18)")
