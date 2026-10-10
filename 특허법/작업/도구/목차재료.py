@@ -15,6 +15,7 @@
     python3 목차재료.py 011           재료 (순번)
     python3 목차재료.py 2-07          재료 (장-장내번호)
     python3 목차재료.py 2-07 --키 진보성 용이성   사례집을 찾을 낱말을 직접 준다
+    python3 목차재료.py --문제 049 080-091    문제별 설문(배점)·답안 목차 전체 — 사례 줄 재료
     python3 목차재료.py --검사        목차집에 없는 논점 · 기본서에 없는 두문자
 """
 import re
@@ -216,6 +217,42 @@ def 본다(행, 더):
     사례(행, 더)
 
 
+def 문제덤프(인자들):
+    """문제마다 설문(배점)과 답안 목차 전체 — 사례 줄을 쓸 재료. '049' '080-091' 꼴."""
+    번호 = []
+    for a in 인자들:
+        m = re.fullmatch(r"(\d{1,3})-(\d{1,3})", a)
+        번호 += ([f"{n:03d}" for n in range(int(m.group(1)), int(m.group(2)) + 1)] if m
+                else [f"{int(a):03d}"])
+    정오 = {r[0]: r[1] for r in 정오표("사례집 5판 정오표")}
+    for p in sorted(사례집.glob("[0-9][0-9][0-9]_*.md")):
+        if p.name[:3] not in 번호:
+            continue
+        L = 본문(p).split("\n")
+        print("=" * 60)
+        print(f"{상대(p)}")
+        for x in L[:5]:
+            if x.strip() and not x.startswith("## ") and not x.startswith("**문제"):
+                print("   " + 맨글(x)[:70])
+        if p.name[:3] in 정오:
+            print(f"   ⚠ 정오 — {정오[p.name[:3]]}")
+        답안 = False
+        for x in L:
+            t = 맨글(x).strip()
+            if t.startswith("답안"):
+                답안 = True
+                continue
+            if not 답안:
+                if x.startswith(">") and (re.match(r"^>\s*\(\s*\d", x) or _배점.search(x)):
+                    print("  Q " + t[1:].strip()[-150:])
+                continue
+            m = _헤딩.match(x)
+            if m and len(m.group(1)) >= 3:
+                print("  " + "  " * (len(m.group(1)) - 3) + 맨글(m.group(2)).strip()[:70])
+            elif re.match(r"^\d{1,2}\s*\.\s*\S", t) and len(t) <= 45:
+                print("    " + t)
+
+
 # ── 검사 ────────────────────────────────────────────────────────
 def 검사():
     """장 파일마다 — 아직 없는 논점, 기본서에 없는 두문자(오기를 잡는다)."""
@@ -251,6 +288,9 @@ if __name__ == "__main__":
     args = sys.argv[1:]
     if "--검사" in args:
         검사()
+        sys.exit()
+    if "--문제" in args:
+        문제덤프(args[args.index("--문제") + 1:])
         sys.exit()
     더 = []
     if "--키" in args:

@@ -27,6 +27,53 @@ from pathlib import Path
 references = 작업 / "references"
 목차표 = references / "기본서목차.tsv"       # 목차표.py 가 만든다
 
+# ── 원본 PDF (리포에 없다 — *.pdf 는 커밋하지 않는다) ─────────────────
+# 두문자·판시가 OCR 로 깨졌을 때 원본 쪽을 잘라 읽는 데 쓴다(두문자원본.py).
+# PC 마다 위치가 다르면 환경변수로 덮는다. 폴더 하나로 줄 때는 TEMA_PDF_DIR,
+# 파일마다 줄 때는 TEMA_TEXTBOOK · TEMA_CASEBOOK · TEMA_ADDENDUM · TEMA_ERRATA
+# (기본서·사례집·추록·정오표 — bash 는 한글 변수 이름을 못 쓴다).
+#
+#     set TEMA_PDF_DIR=D:\자료\테마특허법          (Windows)
+#     export TEMA_PDF_DIR=~/자료/테마특허법          (bash)
+#
+# 폴더로 줄 때는 아래 「파일 이름」 중 하나와 같은 이름의 PDF 를 찾는다.
+_원본 = {
+    # 이 PC(사장님 PC)의 위치. Windows 도 '/' 로 적어도 된다.
+    "기본서": (["F:/GoogleDrive/00-안-개인/03. 변시/01. 특허법/01. 26년 테마 특허법/테마 특허법.pdf",
+               "F:/GoogleDrive/00-안-개인/02. 특허법/06. 테마 특허법/특허_테마_기본서.pdf"],
+              ["테마 특허법.pdf", "특허_테마_기본서.pdf"]),
+    "사례집": (["F:/GoogleDrive/00-안-개인/03. 변시/01. 특허법/01. 26년 테마 특허법/테마 특허법 사례집.pdf"],
+              ["테마 특허법 사례집.pdf", "특허_테마_사례_압축.pdf"]),
+    "추록": (["F:/GoogleDrive/00-안-개인/02. 특허법/06. 테마 특허법/[A4_양면_한쪽]_박지환T_테마특허법_9판_1차추록(특강).pdf"],
+            ["[A4_양면_한쪽]_박지환T_테마특허법_9판_1차추록(특강).pdf"]),
+    "정오표": (["F:/GoogleDrive/00-안-개인/02. 특허법/06. 테마 특허법/테마 사례집_5판_정오표.pdf"],
+              ["테마 사례집_5판_정오표.pdf"]),
+}
+
+
+_변수 = {"기본서": "TEXTBOOK", "사례집": "CASEBOOK", "추록": "ADDENDUM", "정오표": "ERRATA"}
+
+
+def 원본PDF(책="기본서"):
+    """원본 PDF 경로. 못 찾으면 어디를 봤는지 알리고 멈춘다.
+
+    사례집 압축본(「특허_테마_사례_압축.pdf」)도 626쪽, 쪽 배치가 같아 대신 쓸 수 있다(그림 해상도는 낮을 수 있다).
+    """
+    기본, 이름들 = _원본[책]
+    변수 = "TEMA_" + _변수[책]
+    후보 = []
+    if os.environ.get(변수):
+        후보.append(Path(os.environ[변수]))
+    if os.environ.get("TEMA_PDF_DIR"):
+        후보 += [Path(os.environ["TEMA_PDF_DIR"]) / n for n in 이름들]
+    후보 += [Path(p) for p in 기본]
+    for p in 후보:
+        if p.is_file():
+            return p
+    본곳 = "\n  ".join(map(str, 후보))
+    sys.exit(f"{책} 원본 PDF 를 못 찾음. 본 곳:\n  {본곳}\n"
+             f"환경변수 TEMA_PDF_DIR(폴더) 또는 {변수}(파일)로 위치를 알려 줄 것.")
+
 
 def 논점표():
     """기본서목차.tsv → 행 목록. 순번·장·장제목·장내번호·논점·PDF시작·PDF끝·책쪽."""
