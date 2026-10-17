@@ -1,0 +1,259 @@
+{
+  "file": "C:\\temp\\claude\\c--MyCode-pdf2md\\ce1efac5-4d84-4b26-b09b-a6c5e62787f8\\scratchpad\\errata\\pdf\\기본서추록_9판1차.pdf",
+  "size_bytes": 2401637,
+  "pages": 11,
+  "sampled_pages": [
+    1,
+    2,
+    3,
+    4,
+    5,
+    6,
+    7,
+    8,
+    9,
+    10,
+    11
+  ],
+  "text_layer": true,
+  "text_pages_in_sample": 11,
+  "avg_chars_per_page": 956.1,
+  "fonts": [
+    [
+      "SOYSOC+Arita-buri-Bold_OTF",
+      10
+    ],
+    [
+      "COOOAA+KoPubWorldDotumPL",
+      10
+    ],
+    [
+      "SYKWUA+KoPubWorldDotumPB",
+      10
+    ],
+    [
+      "JRLLMN+KoPubWorldBatangPL",
+      10
+    ],
+    [
+      "RFVUMQ+GmarketSansMedium",
+      9
+    ],
+    [
+      "BFQQOS+Arita-buri-Bold_OTF",
+      9
+    ],
+    [
+      "LPRZIN+KoPubWorldDotumPM",
+      7
+    ],
+    [
+      "CIGGSO+NanumSquareEB",
+      6
+    ],
+    [
+      "SSKSYI+Wingdings-Regular",
+      4
+    ],
+    [
+      "TBHGEA+GmarketSansMedium",
+      4
+    ],
+    [
+      "FVZJUN+KoPubWorldBatangPM",
+      2
+    ],
+    [
+      "UKCKQA+KoPubWorldDotumPL",
+      2
+    ]
+  ],
+  "font_embedding": {
+    "embedded": 86
+  },
+  "pdffonts": "(pdffonts 없음 — PyMuPDF 폰트 목록으로 대신함)",
+  "body_size": 10.5,
+  "columns": 1,
+  "parser_key": "text_single_column",
+  "parser_order": [
+    "pymupdf",
+    "pymupdf4llm",
+    "marker"
+  ],
+  "profile_hint": "textbook",
+  "images": {
+    "per_page": [
+      [
+        0,
+        11
+      ]
+    ],
+    "dpi": 0.0,
+    "max_coverage": 0.0,
+    "scanned_with_text_layer": false
+  },
+  "color": {
+    "source": "span",
+    "span_rgb_available": true,
+    "total_spans": 1416,
+    "colored_spans": 384,
+    "distinct_colors": 3,
+    "image_sampled_spans": 0,
+    "image_colored_spans": 0,
+    "image_palette": [],
+    "palette": [
+      {
+        "hex": "#315f97",
+        "spans": 310,
+        "chars": 834,
+        "samples": [
+          [
+            1,
+            "제판"
+          ],
+          [
+            1,
+            "9"
+          ],
+          [
+            1,
+            "제차 추록"
+          ],
+          [
+            1,
+            "1"
+          ],
+          [
+            2,
+            "제차 추록"
+          ]
+        ]
+      },
+      {
+        "hex": "#0000ff",
+        "spans": 69,
+        "chars": 224,
+        "samples": [
+          [
+            2,
+            "후"
+          ],
+          [
+            2,
+            "2024"
+          ],
+          [
+            2,
+            "10658"
+          ],
+          [
+            2,
+            "지식재산처장"
+          ],
+          [
+            2,
+            "지식재산처"
+          ]
+        ]
+      },
+      {
+        "hex": "#ff0000",
+        "spans": 5,
+        "chars": 25,
+        "samples": [
+          [
+            2,
+            "특허청장"
+          ],
+          [
+            2,
+            "특허청"
+          ],
+          [
+            2,
+            "산업통상자원부령"
+          ],
+          [
+            2,
+            "외국특허청"
+          ],
+          [
+            2,
+            "근로자의날"
+          ]
+        ]
+      }
+    ],
+    "drawing_colors": [
+      [
+        "#315f97",
+        589
+      ]
+    ]
+  },
+  "sidenote": {
+    "found": 0,
+    "found_anywhere": 0,
+    "merged_suspect": [],
+    "samples": [],
+    "x_ratios": []
+  },
+  "cases": {
+    "samples": [],
+    "bad_open_brackets": [],
+    "stars_in_sample": 0
+  },
+  "mnemonics": [],
+  "hanja_in_sample": 12,
+  "footnote": {
+    "lines_in_sample": 13,
+    "rule_found": true,
+    "numbers": [
+      12
+    ]
+  },
+  "exam_years": [],
+  "bonus_boxes_in_sample": 0,
+  "problem_numbers": [],
+  "pages_detail": [
+    {
+      "page": 1,
+      "columns": 1,
+      "chars": 26,
+      "spans": 8,
+      "footnote_lines": 1,
+      "footnote_rule": false,
+      "hanja": 0,
+      "cases": [],
+      "bad_open": [],
+      "sidenotes": [],
+      "sidenote_merged": []
+    },
+    {
+      "page": 4,
+      "columns": 1,
+      "chars": 891,
+      "spans": 148,
+      "footnote_lines": 2,
+      "footnote_rule": true,
+      "hanja": 6,
+      "cases": [],
+      "bad_open": [],
+      "sidenotes": [],
+      "sidenote_merged": []
+    },
+    {
+      "page": 7,
+      "columns": 1,
+      "chars": 955,
+      "spans": 115,
+      "footnote_lines": 10,
+      "footnote_rule": true,
+      "hanja": 6,
+      "cases": [],
+      "bad_open": [],
+      "sidenotes": [],
+      "sidenote_merged": []
+    }
+  ]
+}
