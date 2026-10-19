@@ -112,6 +112,21 @@ python3 전말덤프.py 056      # 한 파일 고칠 재료
 python3 색인.py 046          # 기본서 논점번호로
 ```
 
+## Superthread 에 올리기
+
+목차집·템플릿·암기노트를 고쳤으면 Superthread 페이지도 갈아 준다. 도구는 옆 리포
+`C:\MyCode\superthread\upload.py`, 무엇을 어느 스페이스로 올리는지는 이 리포의 `superthread.json`.
+
+```bash
+cd ../superthread
+python upload.py --map ../pdf2md/superthread.json            # 미리보기
+python upload.py --map ../pdf2md/superthread.json --apply    # 보내기 (바뀐 파일만)
+```
+
+- 올린 기록(`superthread.state.json`)도 커밋한다 — 다른 PC 에서 같은 페이지를 갈려면 필요하다.
+- 한 페이지에 마크다운 약 3만 자까지라, 큰 장은 논점 경계에서 하위 페이지 `(1) 052～063` 로 나뉘어 올라간다.
+- Superthread 에서 글자를 고친 페이지는 건너뛴다(`!` 표시). 로컬 파일에 반영한 뒤 `--force`.
+
 ## 이 리포에서 지키는 것
 
 - **브랜치는 `claude/pdf-to-markdown-converter-lvkvkr` 하나만 쓴다.**

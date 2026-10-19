@@ -1,0 +1,9 @@
+{
+  "_README": "Superthread 업로드 목록. ../superthread/upload.py --map 이 파일 로 올린다. 스페이스는 제목으로 찾고 없으면 만든다.",
+  "uploads": [
+    {"glob": "민소법/노트/목차집/CH*.md",   "space": "(목차집) 민사소송법"},
+    {"glob": "민소법/노트/템플릿/CH*.md",   "space": "(템플릿) 민사소송법"},
+    {"glob": "민소법/노트/암기노트/CH*.md", "space": "(암기노트) 민사소송법"},
+    {"glob": "특허법/노트/목차집/CH*.md",   "space": "(목차집) 특허권"}
+  ]
+}
