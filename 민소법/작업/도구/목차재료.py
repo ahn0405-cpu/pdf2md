@@ -19,7 +19,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from 경로 import 기본서, 사례집, 노트, 목차집, 노트들
+from 경로 import 기본서, 사례집, 노트, 목차집, 노트들, 기본서파일
 
 _헤딩 = re.compile(r"^(#{1,6})\s+(.*)$")
 _뱃지 = re.compile(r"`([A-Q]-\d+)`")
@@ -147,10 +147,10 @@ def 사례(L, 표):
 
 
 def 머리말(번호):
-    cands = sorted(기본서.glob(f"*_{번호}*.md"))
-    if not cands:
+    p = 기본서파일(번호)
+    if not p:
         return
-    s = cands[0].read_text(encoding="utf-8")[:4000]
+    s = p.read_text(encoding="utf-8")[:4000]
     for 키 in ("chapter", "exam_years", "outline", "mnemonics", "articles", "bonus_topics"):
         m = re.search(rf"^{키}:\s*(.*)$", s, re.M)
         if m:
@@ -179,7 +179,8 @@ def 검사():
     _두문자 = re.compile(r"`(\[[^\]`]+\])`")
     쓴것 = {}
     for p in sorted(목차집.glob("CH*.md")):
-        조각 = re.split(r"^# (\d{3})\b", p.read_text(encoding="utf-8"), flags=re.M)
+        # `# 025-1` 처럼 하위 논점이 따로 서는 장이 있다 — 번호째 열쇠로 두고 노트 번호로 모은다
+        조각 = re.split(r"^# (\d{3}(?:-\d+)?)(?=\s)", p.read_text(encoding="utf-8"), flags=re.M)
         for n, 글 in zip(조각[1::2], 조각[2::2]):
             쓴것[n] = (p.name, 글)
     없음 = 0
@@ -188,14 +189,16 @@ def 검사():
             n = q.name[:3]
             if not (n.isdigit() and 첫 <= int(n) <= 끝):
                 continue
-            if n not in 쓴것:
+            글들 = [v for k, v in 쓴것.items() if k[:3] == n]
+            if not 글들:
                 print(f"  없음     {n}  (CH{번})")
                 없음 += 1
                 continue
             본문 = re.sub(r"\s", "", q.read_text(encoding="utf-8"))
-            for d in _두문자.findall(쓴것[n][1]):
-                if re.sub(r"\s", "", d) not in 본문:
-                    print(f"  두문자?  {n}  {d}  ({쓴것[n][0]} — 노트에 없다)")
+            for 파일, 글 in 글들:
+                for d in _두문자.findall(글):
+                    if re.sub(r"\s", "", d) not in 본문:
+                        print(f"  두문자?  {n}  {d}  ({파일} — 노트에 없다)")
     print(f"\n목차집 논점 {len(쓴것)}  ·  아직 없음 {없음}")
 
 

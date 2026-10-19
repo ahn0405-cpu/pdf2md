@@ -22,7 +22,7 @@ import re
 import sys
 from pathlib import Path
 
-from 경로 import 기본서, 사례집
+from 경로 import 기본서, 사례집, 기본서파일
 
 _문제 = re.compile(r"^##\s+([A-Z]-\d+)\.")
 _헤딩 = re.compile(r"^###+\s+(.*)$")
@@ -151,11 +151,10 @@ def main() -> int:
         return 0
     src = Path(sys.argv[1])
     if not src.exists():                    # 논점번호만 준 경우
-        cands = sorted(기본서.glob(f"*_{sys.argv[1]}*.md"))
-        if not cands:
+        src = 기본서파일(sys.argv[1])
+        if not src:
             print(f"기본서에 없음: {sys.argv[1]}")
             return 1
-        src = cands[0]
     cases, 표 = 기본서읽기(src)
     논점 = re.sub(r"[\s\d]", "", re.search(r'^chapter: "(.*)"',
                  src.read_text(encoding="utf-8"), re.M).group(1))

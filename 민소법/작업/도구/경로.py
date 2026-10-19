@@ -28,6 +28,17 @@ references = 작업 / "references"
 samples = 작업 / "samples"
 
 
+def 기본서파일(번호):
+    """논점 번호(「034」) → 기본서 변환물 경로. 없으면 None.
+
+    `01_034…md` 는 이름만 034 이고 내용은 책 앞부분(표지·머리말·001)이라 뺀다.
+    011 · 110 · 111 · 113 은 다른 논점 파일 안에 있어 따로 파일이 없다(None) —
+    011 은 `10_010`, 110·111 은 `108_109`, 113 은 `109_112` 뒷부분이다.
+    """
+    cands = [p for p in sorted(기본서.glob(f"*_{번호}*.md")) if not p.name.startswith("01_")]
+    return cands[0] if cands else None
+
+
 def 노트들(인자=None):
     """인자(경로·글롭·번호)를 노트 경로 목록으로 푼다. 비었으면 노트 전부."""
     인자 = sys.argv[1:] if 인자 is None else 인자

@@ -8,17 +8,16 @@ import re
 import sys
 from pathlib import Path
 
-from 경로 import 기본서
+from 경로 import 기본서, 기본서파일
 _절 = re.compile(r"^#{3,4}\s+([IVX]+\.\s*[^\n]+)")
 _항 = re.compile(r"^\*\*(\d+\.\s*[^*]+)\*\*|^==?\*?\*?(\d+\.\s*[^=*]+)")
 _박스 = re.compile(r"^>?\s*#{3,4}\s*☑\s*(.+)")
 
 
 def 읽기(논점: str):
-    cands = sorted(기본서.glob(f"*_{논점}*.md"))
-    if not cands:
+    p = 기본서파일(논점)
+    if not p:
         return None
-    p = cands[0]
     out = []
     위치 = "(논점 머리)"
     for line in p.read_text(encoding="utf-8").splitlines():
