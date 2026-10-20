@@ -3,3 +3,13 @@ package-lock.json
 __pycache__/
 *.pyc
 out/
+
+# 변환 중간 파일 — 용량만 크고 다시 만들 수 있다
+_work/
+
+# 원본 PDF 는 리포에 넣지 않는다 (원본 PDF 가 있는 PC 에 있다)
+*.pdf
+
+
+# 지난 스냅숏 · 백업 — 필요하면 git 이력에서 되살린다
+_보관/
