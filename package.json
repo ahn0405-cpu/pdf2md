@@ -6,7 +6,7 @@
   "description": "PDF를 원본 서식 그대로 Markdown으로 바꾸는 브라우저 전용 도구",
   "scripts": {
     "build": "node build.mjs",
-    "test": "node test/run.mjs"
+    "test": "node --test test/run.mjs test/split.mjs test/folder.mjs"
   },
   "dependencies": {
     "mupdf": "^1.28.0"

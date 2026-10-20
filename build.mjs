@@ -81,6 +81,45 @@ function buildMupdfBundle() {
   return `${wasmGlue}\n${core}\n`;
 }
 
+/** 한 페이지를 단일 HTML 로 묶는다.
+ *
+ * @param shared   WASM 준비 코드 + MuPDF 본체 (두 페이지가 같은 것을 쓴다)
+ * @param page     src/ 안의 HTML 이름
+ * @param modules  의존 순서대로 이어 붙일 src/*.js (마지막이 진입점)
+ * @param outName  dist/ 에 쓸 이름
+ */
+function buildPage(shared, page, modules, outName) {
+  const app = modules
+    .map((name) => moduleToIife(name, read(path.join(SRC, `${name}.js`))))
+    .join('\n');
+  // 모듈 하나를 목록에서 빠뜨리면 참조가 조용히 undefined 가 된다(화면이 그냥
+  // 안 뜬다). 빌드 때 잡는다. mupdf_runtime 은 위 공통 코드가 넣어 준다.
+  const defined = new Set([...modules.map((n) => n.replace(/\W/g, '_')), 'mupdf_runtime']);
+  for (const [, id] of app.matchAll(/__ns_([A-Za-z0-9_]+)/g)) {
+    if (!defined.has(id)) {
+      throw new Error(`${page}: '${id}' 모듈이 빌드 목록에 없습니다.`);
+    }
+  }
+
+  const script = [shared, app].join('\n');
+
+  let html = read(path.join(SRC, page));
+  html = html
+    .replace(/<link rel="stylesheet" href="([\w-]+\.css)">/g,
+             (_, css) => `<style>\n${read(path.join(SRC, css))}\n</style>`)
+    .replace(/\s*<script type="module" src="[\w-]+\.js"><\/script>/,
+             `\n<script type="module">\n${script}\n</script>`);
+
+  if (html.includes('<link rel="stylesheet"') || html.includes('<script type="module" src=')) {
+    throw new Error(`${page} 의 자리표시자를 찾지 못했습니다.`);
+  }
+
+  fs.mkdirSync(DIST, { recursive: true });
+  const out = path.join(DIST, outName);
+  fs.writeFileSync(out, html);
+  console.log(`${path.relative(ROOT, out)}  ${(Buffer.byteLength(html) / 1048576).toFixed(1)} MB`);
+}
+
 function main() {
   const wasm = fs.readFileSync(path.join(MUPDF, 'mupdf-wasm.wasm'));
   const gz = zlib.gzipSync(wasm, { level: 9 });
@@ -113,29 +152,13 @@ globalThis.$libmupdf_wasm_Module = { wasmBinary: await __gunzip(__b64ToBytes(__W
 const __ns_mupdf_runtime = { loadMupdf: async () => __mupdfNamespace };
 `;
 
-  // 의존 순서대로 (app.js 가 나머지를 가져다 쓴다)
-  const app = ['markdown', 'zip', 'converter', 'app']
-    .map((name) => moduleToIife(name, read(path.join(SRC, `${name}.js`))))
-    .join('\n');
+  const shared = [preamble, buildMupdfBundle(), runtime].join('\n');
 
-  const script = [preamble, buildMupdfBundle(), runtime, app].join('\n');
+  // 의존 순서대로 (마지막 모듈이 나머지를 가져다 쓴다)
+  buildPage(shared, 'index.html', ['markdown', 'zip', 'converter', 'app'], 'pdf2md.html');
+  buildPage(shared, 'split.html', ['folder', 'splitter', 'split-app'], 'pdfsplit.html');
 
-  let html = read(path.join(SRC, 'index.html'));
-  html = html
-    .replace('<link rel="stylesheet" href="style.css">',
-             `<style>\n${read(path.join(SRC, 'style.css'))}\n</style>`)
-    .replace(/\s*<script type="module" src="app\.js"><\/script>/,
-             `\n<script type="module">\n${script}\n</script>`);
-
-  if (html.includes('<link rel="stylesheet"') || html.includes('<script type="module" src=')) {
-    throw new Error('index.html 의 자리표시자를 찾지 못했습니다.');
-  }
-
-  fs.mkdirSync(DIST, { recursive: true });
-  const out = path.join(DIST, 'pdf2md.html');
-  fs.writeFileSync(out, html);
-  const mb = (Buffer.byteLength(html) / 1048576).toFixed(1);
-  console.log(`${path.relative(ROOT, out)}  ${mb} MB  (WASM ${(wasm.length / 1048576).toFixed(1)} MB → gzip ${(gz.length / 1048576).toFixed(1)} MB)`);
+  console.log(`WASM ${(wasm.length / 1048576).toFixed(1)} MB → gzip ${(gz.length / 1048576).toFixed(1)} MB`);
 }
 
 main();
