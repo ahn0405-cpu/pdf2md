@@ -17,13 +17,17 @@ for p in 노트들():
         if '=' not in buf:
             print(f'{p}:{i+1}  [{m.group(1)}]  ⚠️풀이없음'); continue
         gloss=buf.split('=',1)[1]
-        heads=[b[0] for b in re.findall(r'\*\*(.+?)\*\*', gloss)]
-        k=0; miss=[]
-        for ch in mn:
-            if not ch.isalpha() and not ('가'<=ch<='힣'): continue
-            j2=k
-            while j2<len(heads) and heads[j2]!=ch: j2+=1
-            if j2>=len(heads): miss.append(ch)
-            else: k=j2+1
+        chunks=re.findall(r'\*\*(.+?)\*\*', gloss)
+        heads=[b[0] for b in chunks]
+        letters=[ch for ch in mn if ch.isalpha() or '가'<=ch<='힣']
+        # 굵은 덩어리 하나가 붙은 두문자 글자 여러 개를 맡을 수 있다 — `[초과 적법]` = **초과**하면 … **적법**
+        k=0; miss=[]; n=0
+        while n<len(letters):
+            ch=letters[n]; j2=k
+            while j2<len(chunks) and chunks[j2][0]!=ch: j2+=1
+            if j2>=len(chunks): miss.append(ch); n+=1; continue
+            t=1
+            while n+t<len(letters) and t<len(chunks[j2]) and chunks[j2][t]==letters[n+t]: t+=1
+            n+=t; k=j2+1
         if miss:
             print(f'{p}:{i+1}  [{m.group(1)}]  머리={"".join(heads)}  ❌미대응:{"".join(miss)}')

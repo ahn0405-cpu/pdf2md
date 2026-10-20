@@ -24,8 +24,9 @@ from 경로 import 작업 as HERE    # SKILL.md·references·samples 가 있는 
     "SKILL.md",
     "references/소스결함.md",
     "references/확인목록.md",
+    "references/목차집.md",
+    "references/암기노트.md",
     "samples/046_일부청구.md",
-    "samples/암기노트_CH06_소송물.md",
 ]
 
 

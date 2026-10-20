@@ -2,8 +2,8 @@
 """목차집(`노트/목차집/CH*.md`)의 논점을 쓸 재료를 한자리에 모으고, 쓴 것을 검사한다.
 
 목차집은 장 파일에 손으로 쓴다 — 기본서 내용·순서의 개조식 요약(학설·判·두문자).
-사례집 답안 순서(template·배점)는 따로 `노트/템플릿/CH*.md` 에 쓴다(2026-10-19 부터, 그 전에는 목차집 ▸ 블록).
-작성 원칙은 `작업/references/목차집.md` · `템플릿.md`. 재료는 네 군데에 흩어져 있다.
+사례집 답안 순서(template·배점)와 압축 문장은 따로 `노트/암기노트/CH*.md` 에 쓴다(2026-10-19 부터, 그 전에는 목차집 ▸ 블록).
+작성 원칙은 `작업/references/목차집.md` · `암기노트.md`. 재료는 네 군데에 흩어져 있다.
 
     1 노트 목차       판례 블록을 뺀 헤딩 트리. 기출·두문자·☑, 아래 판례의 뱃지
     2 의의            I. 의의 의 인용문 (기본서 원문)
@@ -20,7 +20,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from 경로 import 기본서, 사례집, 노트, 목차집, 템플릿, 노트들, 기본서파일
+from 경로 import 기본서, 사례집, 노트, 목차집, 암기노트, 노트들, 기본서파일, 장
 
 _헤딩 = re.compile(r"^(#{1,6})\s+(.*)$")
 _뱃지 = re.compile(r"`([A-Q]-\d+)`")
@@ -176,16 +176,15 @@ def 본다(노트, 표):
 
 def 검사():
     """목차집에 아직 없는 논점, 목차집의 두문자 중 단권화 노트에 없는 것(오기를 잡는다)."""
-    from 암기노트 import 장
-    _두문자 = re.compile(r"`(\[[^\]`]+\])`")
+    _두문자 = re.compile(r"`(\[[^\]`]+\])`(?!✎)")     # ✎ 는 암기노트에 지은 두음 — 노트에 없어도 된다
     쓴것 = {}
-    템플릿글 = {}
-    for p in sorted(목차집.glob("CH*.md")) + sorted(템플릿.glob("CH*.md")):
+    암기글 = {}
+    for p in sorted(목차집.glob("CH*.md")) + sorted(암기노트.glob("CH*.md")):
         # `# 025-1` 처럼 하위 논점이 따로 서는 장이 있다 — 번호째 열쇠로 두고 노트 번호로 모은다
         조각 = re.split(r"^# (\d{3}(?:-\d+)?)(?=\s)", p.read_text(encoding="utf-8"), flags=re.M)
         for n, 글 in zip(조각[1::2], 조각[2::2]):
-            if p.parent == 템플릿:          # 템플릿은 두문자만 본다 — 논점 수는 목차집으로 센다
-                템플릿글.setdefault(n, []).append((f"템플릿/{p.name}", 글))
+            if p.parent == 암기노트:        # 암기노트는 두문자만 본다 — 논점 수는 목차집으로 센다
+                암기글.setdefault(n, []).append((f"암기노트/{p.name}", 글))
             else:
                 쓴것[n] = (p.name, 글)
     없음 = 0
@@ -200,7 +199,7 @@ def 검사():
                 없음 += 1
                 continue
             본문 = re.sub(r"\s", "", q.read_text(encoding="utf-8"))
-            for 파일, 글 in 글들 + [x for k, v in 템플릿글.items() if k[:3] == n for x in v]:
+            for 파일, 글 in 글들 + [x for k, v in 암기글.items() if k[:3] == n for x in v]:
                 for d in _두문자.findall(글):
                     if re.sub(r"\s", "", d) not in 본문:
                         print(f"  두문자?  {n}  {d}  ({파일} — 노트에 없다)")
@@ -209,7 +208,7 @@ def 검사():
 
 
 def _사례번호(글, 전부=False):
-    """장 한 파일의 사례집 문제 번호 → {번호: 처음 나온 논점}. 목차집은 `▸` 블록만, 템플릿은 전부(전부=True)."""
+    """장 한 파일의 사례집 문제 번호 → {번호: 처음 나온 논점}. 목차집은 `▸` 블록만, 암기노트는 전부(전부=True)."""
     out = {}
     for n, 몸 in zip(*[iter(re.split(r"^# (\d{3}(?:-\d+)?)(?=\s)", 글, flags=re.M)[1:])] * 2):
         i = 0 if 전부 else 몸.find("▸")
@@ -220,8 +219,8 @@ def _사례번호(글, 전부=False):
 
 
 def 사라짐():
-    """커밋된 판(목차집 ▸ + 템플릿)에 있던 문제 번호가 지금 판에서 빠졌는가 —
-    사례 줄을 template 으로 갈아 쓰거나 템플릿 파일로 옮기다 문제를 빠뜨리지 않게(2026-10-19).
+    """커밋된 판(목차집 ▸ + 암기노트)에 있던 문제 번호가 지금 판에서 빠졌는가 —
+    사례 줄을 template 으로 갈아 쓰거나 암기노트로 옮기다 문제를 빠뜨리지 않게(2026-10-19).
     장 단위로 본다 — 같은 장 안에서 논점을 옮기는 것은 빠짐이 아니다."""
     import subprocess
     뿌리 = 목차집.parents[2]
@@ -237,7 +236,7 @@ def 사라짐():
     for p in sorted(목차집.glob("CH*.md")):
         전, 지금 = {}, {}
         for 표, 커밋 in ((전, True), (지금, False)):
-            for 파일, 전부 in ((p, False), (템플릿 / p.name, True)):
+            for 파일, 전부 in ((p, False), (암기노트 / p.name, True)):
                 글 = 읽기(파일, 커밋)
                 for b, n in (_사례번호(글, 전부).items() if 글 else ()):
                     표.setdefault(b, n)
