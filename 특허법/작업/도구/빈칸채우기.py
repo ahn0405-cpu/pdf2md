@@ -92,7 +92,8 @@ def 장쓰기(파일):
          "", "<!-- 빈칸채우기.py 가 자료에서 뽑은 것이다. 손으로 고치지 말고 자료를 고친 뒤 다시 뽑는다. -->", ""]
     보고, 답 = [], []
     지금 = None                # (두문자 원문, 글자들, 첫 행, [굵은 말], [[문단마다 굵은 말]])
-    본문시작 = next((i for i, l in enumerate(L) if _논점.match(l)), len(L))
+    # 머리말(제목·안내·주석) 다음부터 — 단문처럼 논점 머리(## <…>) 없이 시작하는 장도 있다
+    본문시작 = next((i + 1 for i, l in enumerate(L) if l.startswith("<!--") and l.rstrip().endswith("-->")), 1)
 
     def 두문자닫기():
         nonlocal 지금
