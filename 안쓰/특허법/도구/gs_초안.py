@@ -5,7 +5,7 @@
     python gs_초안.py 3 --보기   형광펜 종류를 {판 …} {조 …} {취 …} {사 …} 로 보여 준다(교정용, 파일은 안 씀)
 
 - 쪽마다 `<!-- p.N -->`. 문제 쪽은 「N회차 · 문제-k」 머리와 지문·물음, 해설 쪽은 키워드 상자 줄 → 설문 → 번호 목차 → 본문.
-- 살구(판례) 형광펜이 칠해진 낱말은 **굵게**. 노랑(번호 목차 머리)은 줄 앞 `#### `.
+- 판례(살구)·조문(연두)·취지(하늘) 형광펜이 칠해진 구절은 **굵게**(= 빈칸 대상, 사안 보라는 뺀다). 노랑(번호 목차 머리)은 줄 앞 `#### `.
 - 확실한 OCR 오류만 표로 고친다(法 · 判例 · 원문자 ①② · 「있디」 → 「있다」 · 「기능하」 → 「가능하」 · 「제2회」 → 「제2호」 …).
   나머지는 노트로 옮길 때 쪽 그림을 보고 고친다.
 """
@@ -73,14 +73,18 @@ def 원문자(lines):
     return out
 
 
+빈칸색 = ("판례", "조문", "취지")             # 빈칸이 되는 형광펜 — 사안(보라)은 뺀다
+
+
 def 쪽읽기(no, 보기=False):
+    """쪽 → md 줄. 형광펜은 글자 단위로 판정한다 — OCR 낱말 상자를 글자 수로 고르게 나눠 글자 가운데가 든 사각형의 색.
+    (낱말 가운데로 판정하면 「실질적으로 기여|해야」처럼 낱말 중간에서 끝나는 형광펜을 놓친다.)"""
     d = json.loads((작업 / f"p{no:03d}.json").read_text(encoding="utf-8"))
     hl = json.loads((작업 / f"p{no:03d}.hl.json").read_text(encoding="utf-8"))["형광"]
 
-    def 색(w):
-        cx, cy = w["x"] + w["w"] / 2, w["y"] + w["h"] / 2
+    def 색(cx, cy):
         for r in hl:
-            if r["x0"] - 2 <= cx <= r["x1"] + 2 and r["y0"] - 2 <= cy <= r["y1"] + 2:
+            if r["x0"] - 1 <= cx <= r["x1"] + 1 and r["y0"] - 2 <= cy <= r["y1"] + 2:
                 return r["색"]
         return None
 
@@ -91,36 +95,44 @@ def 쪽읽기(no, 보기=False):
             continue
         if re.fullmatch(r"\d{1,3}", l["text"].strip()) and ws[0]["y"] > 2700:
             continue                                        # 쪽 번호
-        조각, 앞색 = [], None
+        글 = []                                              # [(글자, 색)]
         머리 = False
-        for w in ws:
-            c = 색(w)
-            if c in ("머리", "머리2"):
-                머리 = True
-                c = None
+        for k, w in enumerate(ws):
+            t = w["t"]
+            cy = w["y"] + w["h"] / 2
+            폭 = w["w"] / max(1, len(t))
+            for i, ch in enumerate(t):
+                c = 색(w["x"] + 폭 * (i + 0.5), cy)
+                if c in ("머리", "머리2"):
+                    머리 = True
+                    c = None
+                글.append((ch, c))
+            if k < len(ws) - 1:
+                다음 = ws[k + 1]
+                사이 = 색((w["x"] + w["w"] + 다음["x"]) / 2, cy)  # 낱말 사이 빈칸도 칠해졌으면 같은 덩어리
+                글.append((" ", 사이 if 사이 not in ("머리", "머리2") else None))
+        조각, 앞 = [], None
+        for ch, c in 글:
+            k = (약칭.get(c, c) if 보기 else (c in 빈칸색)) if c else None
             if 보기:
-                if c != 앞색:
-                    if 앞색:
+                if k != 앞:
+                    if 앞:
                         조각.append("}")
-                    if c:
-                        조각.append("{" + 약칭.get(c, c) + " ")
-                조각.append(w["t"] + " ")
+                    if k:
+                        조각.append("{" + k + " ")
             else:
-                if c == "판례" and 앞색 != "판례":
+                if k and not 앞:
                     조각.append("**")
-                elif c != "판례" and 앞색 == "판례":
-                    if 조각:
-                        조각[-1] = 조각[-1].rstrip()
-                    조각.append("** ")
-                조각.append(w["t"] + " ")
-            앞색 = c
-        if 앞색 and 보기:
-            조각.append("}")
-        if 앞색 == "판례" and not 보기:
-            조각[-1] = 조각[-1].rstrip()
-            조각.append("**")
+                elif 앞 and not k:
+                    조각.append("**")
+            조각.append(ch)
+            앞 = k
+        if 앞:
+            조각.append("}" if 보기 else "**")
         t = re.sub(r"\s+", " ", "".join(조각)).strip()
-        t = re.sub(r"\*\*\s+", "**", t) if t.startswith("**") else t
+        t = re.sub(r"\*\*(\s+)", r"**", t)              # 굵게 시작 뒤 빈칸은 밖으로
+        t = re.sub(r"(\s+)\*\*(?=\s|$)", r"**", t)
+        t = t.replace("****", "")
         t = 고치기(t)
         lines.append(("#### " if 머리 else "") + t)
     return 원문자(lines)
@@ -151,7 +163,7 @@ def main(argv):
         sys.exit(f"{회}회차 쪽을 못 찾았다 — gs_ocr.py 로 그 범위를 먼저 OCR 한다")
     out = [f"# 박형준 기초 GS · {회}회차 — OCR 원문", "",
            "Windows OCR 로 옮긴 **교정 전 원문**이다. 오타가 남아 있다 — 노트는 `../../박형준GS/`.",
-           "**굵은 말** = 살구색(판례) 형광펜. `####` = 노란 번호 목차 머리.", "",
+           "**굵은 말** = 판례(살구)·조문(연두)·취지(하늘) 형광펜 — 빈칸 대상. 사안(보라)은 표시 안 함. `####` = 노란 번호 목차 머리.", "",
            f"<!-- gs_초안.py 2026-11-08 · 쪽 {쪽들[0]}～{쪽들[-1]} -->", ""]
     for no in 쪽들:
         out += [f"<!-- p.{no} -->", ""] + [x for t in 쪽읽기(no, 보기) for x in (t, "")]
