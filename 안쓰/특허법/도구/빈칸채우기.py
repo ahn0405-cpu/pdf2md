@@ -15,8 +15,10 @@
 - 검사에서 `<도쓰>` 칸(도쓰 원문을 그대로 옮긴 곳)의 굵은 말 없는 판례 줄은 세지 않는다.
 - `<!-- … -->` 주석은 뺀다.
 - 플래시카드 = 휴대폰 앱 Flashcards Deluxe 덱(탭 구분 UTF-8 .txt, 머리줄 `Text 1 Text 2 Category 1 Category 2`).
-  소제목(가장 깊은 `#` 머리 · `▸ …` · `[논점]`) 하나 = 카드 한 장. 앞 = 빈칸(카드마다 1부터), 뒤 = 정답 <b>굵게</b>.
+  소제목(가장 깊은 `#` 머리 · `▸ …` · `[논점]`) 아래 **문단 하나 = 카드 한 장**(폰 화면에서 잘리지 않게).
+  앞 = 경로 · 소제목 · 빈칸(카드마다 1부터, 앱에서는 반각 `_`), 뒤 = 소제목 · 정답 <b>굵게</b>.
   분류1 = `##`(회차·문제 / 장), 분류2 = `###`(설문 / 절). `|` = 앱의 줄바꿈.
+    python 빈칸채우기.py --csv <폴더>   구글 드라이브 업로드용 따옴표 CSV 도 쓴다(GS 는 회차마다 한 파일).
 """
 import re
 import sys
@@ -35,11 +37,12 @@ _두음 = re.compile(r"〔([^〕]+)〕")
 번호머리 = 3          # 이 단계 이하의 머리(## ～ #×번호머리)에서 번호를 1부터 다시 센다
 _표지 = re.compile(r"\*\*\(([^*()]+)\)\*\*")
 _빈칸 = re.compile(r"\(\d+ [＿ ]+\)")
+_카드빈칸 = re.compile(r"\(\d+ [_ ]+\)")
 
 
-def 밑줄(w):
-    """정답 글자 수만큼 ＿(전각) — 단어 사이 띄어쓰기는 그대로."""
-    return " ".join("＿" * len(t) for t in w.split())
+def 밑줄(w, 글자="＿"):
+    """정답 글자 수만큼 ＿(전각, 인쇄용) 또는 _(반각, 앱용) — 단어 사이 띄어쓰기는 그대로."""
+    return " ".join(글자 * len(t) for t in w.split())
 
 
 def 머리인가(line):
@@ -105,20 +108,15 @@ def 카드글(s):
 
 
 def 카드뽑기(본문):
-    """소제목 하나 = 카드 한 장. [앞, 뒤, 분류1, 분류2] 를 돌려준다.
-    소제목 = 가장 깊은 `#` 머리(GS `####`) 또는 `▸ …` · `[논점]` 줄. 빈칸 없는 카드는 뺀다.
-    앞 = 위 머리 경로 · 소제목(굵게) · 빈칸 낸 본문(번호는 카드마다 1부터), 뒤 = 같은 본문에 정답 <b>굵게</b>."""
+    """문단 하나 = 카드 한 장. [앞, 뒤, 분류1, 분류2] 를 돌려준다.
+    소제목(가장 깊은 `#` 머리 · `▸ …` · `[논점]` 줄) 아래 빈칸 있는 줄마다 카드. 빈칸 없는 줄(이끄는 줄)은
+    다음 빈칸 줄 앞에 붙이고, 소제목 끝에 남으면 버린다.
+    앞 = 머리 경로 · 소제목(굵게) · 빈칸 낸 문단(번호는 카드마다 1부터, 밑줄은 반각 _),
+    뒤 = 소제목(굵게) · 같은 문단에 정답 <b>굵게</b>."""
     카드 = []
     머리들 = {}            # 단계 → 머리 글
-    제목, 앞줄, 뒷줄, 빈수 = "", [], [], 0
+    제목, 이끔 = "", []
     머리끝 = False
-
-    def 내기():
-        if 빈수:
-            경로 = " › ".join(카드글(머리들[k]) for k in sorted(머리들) if 머리들[k] != 제목)
-            위 = f"{경로}|<b>{카드글(제목)}</b>||" if 제목 else f"{경로}||"
-            카드.append([위 + "|".join(앞줄), 위 + "|".join(뒷줄),
-                       카드글(머리들.get(2, "")), 카드글(머리들.get(3, ""))])
 
     for line in 본문.split("\n"):
         line = re.sub(r"\s*<!--.*?-->", "", line).rstrip()
@@ -129,8 +127,7 @@ def 카드뽑기(본문):
                 continue
         m = re.match(r"^(#{2,6}) (.*)", line)
         if m or 소제목인가(line):
-            내기()
-            앞줄, 뒷줄, 빈수 = [], [], 0
+            이끔 = []
             if m:
                 k = len(m.group(1))
                 머리들 = {j: t for j, t in 머리들.items() if j < k}
@@ -140,29 +137,45 @@ def 카드뽑기(본문):
             continue
         if not line:
             continue
-        line = _표지.sub(lambda m: f"〔{m.group(1)}〕", line)
-        조각 = _굵.split(카드글(line))        # 짝수 = 그냥 글, 홀수 = 굵은 말
-        앞, 뒤, 낱말 = [], [], 조각[1::2]
-        for i, t in enumerate(조각):
-            if i % 2:
-                빈수 += 1
-                앞.append(f"({빈수} {밑줄(t)})")
-                뒤.append(f"<b>{t}</b>")
-            else:
-                앞.append(t)
-                뒤.append(t)
-        앞 = "".join(앞)
-        if 낱말 and not _두음.search(앞):
+        line = 카드글(_표지.sub(lambda m: f"〔{m.group(1)}〕", line))
+        조각 = _굵.split(line)        # 짝수 = 그냥 글, 홀수 = 굵은 말
+        낱말 = 조각[1::2]
+        if not 낱말:
+            이끔.append(line)
+            continue
+        앞 = "".join(f"({i // 2 + 1} {밑줄(t, '_')})" if i % 2 else t for i, t in enumerate(조각))
+        뒤 = "".join(f"<b>{t}</b>" if i % 2 else t for i, t in enumerate(조각))
+        if not _두음.search(앞):
             앞 += " 〔" + "".join(w.lstrip("(法 ")[0] for w in 낱말) + "〕"
-        앞줄.append(앞)
-        뒷줄.append("".join(뒤))
-    내기()
+        경로 = " › ".join(카드글(머리들[k]) for k in sorted(머리들) if 머리들[k] != 제목)
+        제 = f"<b>{카드글(제목)}</b>||" if 제목 else ""
+        카드.append([f"{경로}|{제}" + "|".join(이끔 + [앞]), 제 + "|".join(이끔 + [뒤]),
+                   카드글(머리들.get(2, "")), 카드글(머리들.get(3, ""))])
+        이끔 = []
     return 카드
 
 
+카드머리 = ["Text 1", "Text 2", "Category 1", "Category 2"]
+
+
 def 카드파일(카드):
-    머리줄 = "Text 1\tText 2\tCategory 1\tCategory 2"
-    return "\n".join([머리줄] + ["\t".join(c) for c in 카드]) + "\n"
+    return "\n".join("\t".join(c) for c in [카드머리] + 카드) + "\n"
+
+
+def 카드csv(카드, 폴더, 이름):
+    """구글 드라이브 업로드용 — 칸마다 따옴표 CSV(탭은 업로드 때 사라진다). 분류1 이 `N회차 …` 면 회차마다 한 파일."""
+    import csv
+    import io
+    폴더.mkdir(parents=True, exist_ok=True)
+    묶음 = {}
+    for c in 카드:
+        m = re.match(r"(\d+회차)", c[2])
+        묶음.setdefault(f"{이름} {m.group(1)}" if m else 이름, []).append(c)
+    for 파일, 장 in 묶음.items():
+        buf = io.StringIO()
+        csv.writer(buf, quoting=csv.QUOTE_ALL, lineterminator="\n").writerows([카드머리] + 장)
+        (폴더 / f"{파일}.csv").write_text(buf.getvalue(), encoding="utf-8", newline="\n")
+        print(f"  {파일}.csv  {len(장)}장")
 
 
 def 검사(본문):
@@ -191,7 +204,7 @@ def 검사(본문):
     if 빈 != 답수:
         print(f"  빈칸 {빈} ↔ 정답 {답수} — 개수가 다르다")
         문제 += 1
-    카드빈 = sum(len(_빈칸.findall(c[0])) for c in 카드뽑기(본문))
+    카드빈 = sum(len(_카드빈칸.findall(c[0])) for c in 카드뽑기(본문))
     if 빈 != 카드빈:
         print(f"  빈칸 {빈} ↔ 플래시카드 빈칸 {카드빈} — 개수가 다르다")
         문제 += 1
@@ -217,6 +230,8 @@ def main(argv):
     장 = 카드뽑기(본문)
     카드.write_text(카드파일(장), encoding="utf-8-sig", newline="\n")   # BOM — 앱이 UTF-8 로 읽게
     print(f"{빈칸.name}  빈칸 {len(_빈칸.findall(문서))}개\n{정답.name}\n{카드.name}  카드 {len(장)}장")
+    if "--csv" in argv:
+        카드csv(장, Path(argv[argv.index("--csv") + 1]).resolve(), 카드.stem)
 
 
 if __name__ == "__main__":
